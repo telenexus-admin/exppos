@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: speedyhive
+      POSTGRES_USER: speedyhive
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U speedyhive -d speedyhive"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://speedyhive:${POSTGRES_PASSWORD}@db:5432/speedyhive
+      AUTH_SECRET: ${AUTH_SECRET}
+      APP_URL: ${APP_URL}
+      AUTH_ACCESS_TOKEN_TTL: 15m
+      AUTH_REFRESH_TOKEN_TTL_DAYS: 30
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+networks:
+  internal:
+volumes:
+  postgres_data:
