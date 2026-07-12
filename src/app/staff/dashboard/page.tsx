@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
+import { ShiftStarter } from "@/components/shift-starter";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 
@@ -62,7 +63,10 @@ export default async function StaffDashboard() {
   });
 
   const roleLabel = user.roles.map(({ role }) => role.name).join(", ") || "Staff member";
-  const assignedBranch = openShift?.branch.name ?? user.branches[0]?.branch.name ?? "No branch assigned";
+  const assignedBranches = user.branches
+    .filter(({ branch }) => branch.status === "ACTIVE")
+    .map(({ branch }) => ({ id: branch.id, name: branch.name }));
+  const assignedBranch = openShift?.branch.name ?? assignedBranches[0]?.name ?? "No branch assigned";
   const currency = user.tenant.currency || "KES";
   const sales = openShift?.sales ?? [];
   const totalSales = sales.reduce((sum, sale) => sum + Number(sale.total), 0);
@@ -96,13 +100,13 @@ export default async function StaffDashboard() {
           <a href="/app/pos" className="primary action-link">Go to POS checkout</a>
         </div>
       ) : (
-        <div className="shift-banner">
+        <div className="shift-banner shift-banner--empty">
           <div>
             <small>NO OPEN SHIFT</small>
             <h3>Your sales workspace is ready</h3>
-            <small>Open a shift from the POS checkout before processing the first sale.</small>
+            <small>Open your assigned branch shift before processing the first sale.</small>
           </div>
-          <a href="/app/pos" className="primary action-link">Open POS checkout</a>
+          <ShiftStarter branches={assignedBranches} currency={currency} />
         </div>
       )}
 
