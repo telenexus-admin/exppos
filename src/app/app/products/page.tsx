@@ -64,6 +64,7 @@ export default async function ProductsPage() {
     (sum, product) => sum + product.inventories.reduce((inner, inventory) => inner + Number(inventory.quantity), 0),
     0,
   );
+  const canEdit = session.permissions.has("product.update");
 
   return (
     <PortalShell title="Products" role={roleLabel} current="products" branchName={tenant.name}>
@@ -71,7 +72,7 @@ export default async function ProductsPage() {
         <div>
           <small>PRODUCT CATALOGUE</small>
           <h3>Products, prices and selling details</h3>
-          <p>Create products here and allocate opening stock. Each item will become available to the Inventory tab and the assigned branch POS.</p>
+          <p>Create products here, then click any product row to edit its name, size or volume wording, pricing, barcode, category, tax, status, or stock-tracking setting.</p>
         </div>
         <ProductManager
           branches={branches}
@@ -91,7 +92,7 @@ export default async function ProductsPage() {
 
       <article className="panel catalog-data-panel">
         <div className="catalog-panel-heading">
-          <div><small>LIVE CATALOGUE</small><h3>Product directory</h3><p>Prices and branch allocation are read directly from the tenant database.</p></div>
+          <div><small>LIVE CATALOGUE</small><h3>Product directory</h3><p>{canEdit ? "Click a product to open its editor." : "Prices and branch allocation are read directly from the tenant database."}</p></div>
           <span>{products.length} item{products.length === 1 ? "" : "s"}</span>
         </div>
 
@@ -109,14 +110,20 @@ export default async function ProductsPage() {
             {products.map((product) => {
               const units = product.inventories.reduce((sum, inventory) => sum + Number(inventory.quantity), 0);
               const branchNames = product.inventories.map((inventory) => inventory.branch.name).join(", ") || "Not allocated";
-              return (
-                <div className="product-table" key={product.id}>
-                  <div className="catalog-product-cell"><span>{product.name.slice(0, 1).toUpperCase()}</span><div><strong>{product.name}</strong><small>SKU {product.sku}{product.barcode ? ` · ${product.barcode}` : ""}</small></div></div>
+              const rowContent = (
+                <>
+                  <div className="catalog-product-cell"><span>{product.name.slice(0, 1).toUpperCase()}</span><div><strong>{product.name}</strong><small>SKU {product.sku}{product.barcode ? ` · ${product.barcode}` : ""}{canEdit ? " · Click to edit" : ""}</small></div></div>
                   <div><strong>{product.category?.name ?? "Uncategorized"}</strong><small>{product.trackStock ? "Stock item" : "Service / unlimited"}</small></div>
                   <div><strong>{money(Number(product.sellingPrice), currency)}</strong><small>Cost {money(Number(product.costPrice), currency)} · Tax {(Number(product.taxRate) * 100).toFixed(2)}%</small></div>
                   <div><strong>{product.trackStock ? units.toLocaleString("en-KE", { maximumFractionDigits: 3 }) : "Unlimited"}</strong><small title={branchNames}>{branchNames}</small></div>
                   <span className={`catalog-status ${product.status === "active" ? "active" : "inactive"}`}>{product.status}</span>
-                </div>
+                </>
+              );
+
+              return canEdit ? (
+                <a className="product-table catalog-row-link" href={`/app/products/${product.id}/edit`} key={product.id}>{rowContent}</a>
+              ) : (
+                <div className="product-table" key={product.id}>{rowContent}</div>
               );
             })}
           </div>
