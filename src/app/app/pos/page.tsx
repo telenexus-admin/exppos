@@ -1,42 +1,54 @@
 import { redirect } from "next/navigation";
+import { PosTerminal, type PosProduct } from "@/components/pos-terminal";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { requirePermission } from "@/server/security/context";
-import { PosTerminal, type PosProduct } from "@/components/pos-terminal";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function PosPage() {
   const session = await requireCurrentTenant();
   requirePermission(session, "product.view");
   requirePermission(session, "inventory.view");
+  const scope = await resolveTenantAccessScope(db, session);
 
   const user = await db.user.findFirst({
     where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" },
     include: {
       tenant: true,
-      roles: { include: { role: true } },
-      branches: { include: { branch: true } },
+      roles: {
+        where: { role: { tenantId: session.tenantId } },
+        include: { role: true },
+      },
     },
   });
 
   if (!user) redirect("/login");
 
-  const openShift = await db.shift.findFirst({
-    where: {
-      tenantId: session.tenantId,
-      userId: session.userId,
-      branchId: { in: [...session.branchIds] },
-      status: "OPEN",
-    },
-    include: { branch: true },
-    orderBy: { openedAt: "desc" },
-  });
+  const [openShift, accessibleBranches] = await Promise.all([
+    db.shift.findFirst({
+      where: {
+        tenantId: session.tenantId,
+        userId: session.userId,
+        branchId: { in: scope.branchIds },
+        status: "OPEN",
+      },
+      include: { branch: true },
+      orderBy: { openedAt: "desc" },
+    }),
+    db.branch.findMany({
+      where: {
+        tenantId: session.tenantId,
+        id: { in: scope.branchIds },
+        status: "ACTIVE",
+      },
+      orderBy: [{ isHeadOffice: "desc" }, { name: "asc" }],
+    }),
+  ]);
 
-  const assignedBranches = user.branches
-    .map((assignment) => assignment.branch)
-    .filter((branch) => branch.tenantId === session.tenantId && branch.status === "ACTIVE");
-  const activeBranch = openShift?.branch ?? assignedBranches[0] ?? null;
+  const activeBranch = openShift?.branch ?? accessibleBranches[0] ?? null;
 
   const inventory = activeBranch
     ? await db.branchInventory.findMany({
@@ -63,8 +75,7 @@ export default async function PosPage() {
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
 
-  const roleCodes = user.roles.map(({ role }) => role.code);
-  const returnPath = roleCodes.includes("TENANT_ADMIN") ? "/app/dashboard" : "/staff/dashboard";
+  const returnPath = scope.isTenantAdmin ? "/app/dashboard" : "/staff/dashboard";
   const canSell = session.permissions.has("sale.create") && session.permissions.has("payment.receive");
 
   return (
