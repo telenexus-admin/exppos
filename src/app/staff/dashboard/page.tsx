@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
+import { ShiftStarter } from "@/components/shift-starter";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 
@@ -35,7 +36,8 @@ export default async function StaffDashboard() {
   });
 
   const role = user.roles.map(({ role: assignedRole }) => assignedRole.name).join(", ") || "Staff member";
-  const branchName = openShift?.branch.name ?? user.branches[0]?.branch.name ?? "No branch assigned";
+  const assignedBranches = user.branches.filter(({ branch }) => branch.status === "ACTIVE").map(({ branch }) => ({ id: branch.id, name: branch.name }));
+  const branchName = openShift?.branch.name ?? assignedBranches[0]?.name ?? "No branch assigned";
   const currency = user.tenant.currency || "KES";
   const sales = openShift?.sales ?? [];
   const totalSales = sales.reduce((sum, sale) => sum + Number(sale.total), 0);
@@ -55,7 +57,7 @@ export default async function StaffDashboard() {
       {openShift ? (
         <div className="shift-banner"><div><span className="status-dot"/><small>SHIFT OPEN</small><h3>Started {new Intl.DateTimeFormat("en-KE", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Nairobi" }).format(openShift.openedAt)}</h3><p>{openShift.branch.name} · Opening cash {formatMoney(Number(openShift.openingCash), currency)}</p></div><a href="/app/pos" className="primary action-link">Go to POS checkout</a></div>
       ) : (
-        <div className="panel staff-empty-shift"><span>○</span><div><small>SHIFT STATUS</small><h3>No open shift</h3><p>Open a shift before processing sales. Your assigned branch manager can help if shift opening is restricted.</p></div></div>
+        <div className="panel staff-empty-shift"><span>○</span><div><small>SHIFT STATUS</small><h3>No open shift</h3><p>Open a shift before processing sales.</p><ShiftStarter branches={assignedBranches} currency={currency} /></div></div>
       )}
       <div className="metrics staff-metrics">{metrics.map(([label, value]) => <article className="metric" key={label}><small>{label}</small><strong>{value}</strong><span>{openShift ? "Current shift" : "No active shift"}</span></article>)}</div>
     </PortalShell>
