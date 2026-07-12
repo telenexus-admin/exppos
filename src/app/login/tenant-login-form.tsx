@@ -37,15 +37,15 @@ export function TenantLoginForm() {
     const password = String(data.get("password") ?? "");
 
     if (tenantSlug.length < 2) {
-      setError("Enter the business code or business slug supplied by the administrator.");
+      setError("Enter the business code, slug, or business email shown in the operator panel.");
       return;
     }
     if (identifier.length < 3) {
-      setError("Enter the staff username, email address, or phone number.");
+      setError("Enter the administrator/staff username, email address, phone number, or the tenant business email.");
       return;
     }
     if (!password) {
-      setError("Enter the password supplied by the administrator.");
+      setError("Enter the password supplied by the operator or administrator.");
       return;
     }
 
@@ -82,7 +82,7 @@ export function TenantLoginForm() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          setError(body.error?.message ?? "Incorrect business code, username, or password.");
+          setError(body.error?.message ?? "Incorrect business code, administrator/staff username, or password.");
         } else if (response.status === 429) {
           setError(body.error?.message ?? "Too many login attempts. Wait a few minutes and try again.");
         } else {
@@ -121,27 +121,29 @@ export function TenantLoginForm() {
       <p className="eyebrow">ADMIN &amp; STAFF SIGN IN</p>
       <h2>Welcome back</h2>
       <p className="tenant-login-help">
-        Administrators and staff use this same secure login page. Staff should enter the business code,
-        username, and temporary password created in the Staff tab.
+        Tenant administrators created in the operator panel use this page. Enter the business code,
+        slug, or business email, then the administrator email/username and temporary password.
       </p>
 
       <label>
-        Business slug or code
+        Business code, slug, or business email
         <input
           name="tenantSlug"
-          placeholder="your-business or CODE-001"
+          placeholder="CODE-001, your-business, or business@email.com"
           required
           minLength={2}
           autoComplete="organization"
+          autoCapitalize="none"
+          spellCheck={false}
           disabled={loading}
         />
       </label>
 
       <label>
-        Staff username, email, or phone
+        Administrator/staff username, email, or phone
         <input
           name="identifier"
-          placeholder="mary.w or you@company.com"
+          placeholder="STAFF-000001 or admin@company.com"
           required
           minLength={3}
           autoComplete="username"
@@ -181,7 +183,7 @@ export function TenantLoginForm() {
       </button>
 
       <small className="tenant-login-note">
-        A tenant administrator opens the admin dashboard. Cashiers and other staff open the staff dashboard.
+        Tenant administrators open the admin dashboard. Cashiers and other staff open the staff dashboard.
       </small>
     </form>
   );
