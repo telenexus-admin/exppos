@@ -13,3 +13,99 @@
     overflow: hidden;
   }
 }
+
+.shift-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.shift-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: rgba(5, 18, 13, .78);
+}
+
+.shift-start-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 16px;
+  width: min(500px, 100%);
+  padding: 28px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, .38);
+}
+
+.shift-start-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.shift-start-heading h3 {
+  margin: 5px 0;
+  font-size: 1.4rem;
+}
+
+.shift-start-heading p {
+  margin: 0;
+  color: #667a72;
+  line-height: 1.55;
+}
+
+.shift-close-button {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  font-size: 1.45rem;
+}
+
+.shift-start-card label {
+  display: grid;
+  gap: 7px;
+  color: #34473f;
+  font-size: .82rem;
+  font-weight: 700;
+}
+
+.shift-start-card input,
+.shift-start-card select {
+  width: 100%;
+  border: 1px solid #cad7d1;
+  border-radius: 10px;
+  background: #fff;
+  color: #172a22;
+  padding: 12px 13px;
+  font: inherit;
+}
+
+.shift-start-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.shift-open-button {
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .shift-start-card {
+    padding: 20px;
+  }
+
+  .shift-banner--empty {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
