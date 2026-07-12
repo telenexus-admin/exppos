@@ -122,7 +122,7 @@ export function StaffManager({ branches, businessCode, canCreate }: { branches: 
             <span className="credentials-success">✓</span>
             <small>ACCOUNT CREATED</small>
             <h3 id="credentials-title">Login details for {credentials.fullName}</h3>
-            <p>Share these credentials securely. The staff member will be asked to change the temporary password.</p>
+            <p>Share these credentials securely. The temporary password is displayed here only for handover.</p>
             <dl>
               <div><dt>Business code</dt><dd>{credentials.businessCode}</dd></div>
               <div><dt>Username</dt><dd>{credentials.username}</dd></div>
