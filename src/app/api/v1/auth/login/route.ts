@@ -10,15 +10,50 @@ import { AppError } from "@/lib/errors";
 import type { Permission } from "@/server/security/context";
 
 const schema = z.object({
-  tenantSlug: z.string().trim().min(2, "Enter the business code or business slug"),
-  identifier: z.string().trim().min(3, "Enter the staff username, email address, or phone number"),
-  password: z.string().min(1, "Enter the password supplied by the administrator"),
+  tenantSlug: z.string().trim().min(2, "Enter the business code, slug, or business email"),
+  identifier: z.string().trim().min(3, "Enter the administrator/staff username, email address, or phone number"),
+  password: z.string().min(1, "Enter the password supplied by the operator or administrator"),
 });
+
+const activeTenantStatuses = ["TRIAL", "ACTIVE", "GRACE_PERIOD"] as const;
+
+const userInclude = {
+  tenant: true,
+  branches: true,
+  roles: {
+    include: {
+      role: {
+        include: {
+          rolePermissions: { include: { permission: true } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.UserInclude;
 
 function loginAttemptHash(businessKey: string, identifier: string) {
   return createHash("sha256")
     .update(`${businessKey.trim().toLowerCase()}:${identifier.trim().toLowerCase()}`)
     .digest("hex");
+}
+
+function phoneCandidates(value: string) {
+  const raw = value.trim();
+  const compact = raw.replace(/[\s()-]/g, "");
+  const candidates = new Set<string>([raw, compact]);
+
+  if (/^\+254\d{9}$/.test(compact)) {
+    candidates.add(compact.slice(1));
+    candidates.add(`0${compact.slice(4)}`);
+  } else if (/^254\d{9}$/.test(compact)) {
+    candidates.add(`+${compact}`);
+    candidates.add(`0${compact.slice(3)}`);
+  } else if (/^0\d{9}$/.test(compact)) {
+    candidates.add(`254${compact.slice(1)}`);
+    candidates.add(`+254${compact.slice(1)}`);
+  }
+
+  return [...candidates].filter(Boolean);
 }
 
 async function recordLoginAttempt({
@@ -69,33 +104,62 @@ export async function POST(req: NextRequest) {
       throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
     }
 
-    const user = await db.user.findFirst({
+    const tenant = await db.tenant.findFirst({
       where: {
-        tenant: {
-          OR: [{ slug: businessKey.toLowerCase() }, { code: businessKey.toUpperCase() }],
-          status: { in: ["TRIAL", "ACTIVE", "GRACE_PERIOD"] },
-        },
+        status: { in: [...activeTenantStatuses] },
         OR: [
-          { email: normalizedIdentifier },
-          { phone: body.identifier.trim() },
-          { staffNumber: { equals: body.identifier.trim(), mode: "insensitive" } },
+          { slug: businessKey.toLowerCase() },
+          { code: businessKey.toUpperCase() },
+          { email: businessKey.toLowerCase() },
         ],
-        status: "ACTIVE",
       },
-      include: {
-        tenant: true,
-        branches: true,
-        roles: {
-          include: {
-            role: {
-              include: {
-                rolePermissions: { include: { permission: true } },
+      select: { id: true, name: true, email: true },
+    });
+
+    if (!tenant) {
+      await recordLoginAttempt({
+        tenantSlug: businessKey,
+        identifierHash,
+        ipAddress,
+        succeeded: false,
+      });
+      throw new AppError(
+        "INVALID_CREDENTIALS",
+        "Incorrect business code, administrator/staff username, or password",
+        401,
+      );
+    }
+
+    let user = normalizedIdentifier === tenant.email.toLowerCase()
+      ? await db.user.findFirst({
+          where: {
+            tenantId: tenant.id,
+            status: "ACTIVE",
+            roles: {
+              some: {
+                role: { tenantId: tenant.id, code: "TENANT_ADMIN" },
               },
             },
           },
+          include: userInclude,
+          orderBy: { createdAt: "asc" },
+        })
+      : null;
+
+    if (!user) {
+      user = await db.user.findFirst({
+        where: {
+          tenantId: tenant.id,
+          status: "ACTIVE",
+          OR: [
+            { email: normalizedIdentifier },
+            { phone: { in: phoneCandidates(body.identifier) } },
+            { staffNumber: { equals: body.identifier.trim(), mode: "insensitive" } },
+          ],
         },
-      },
-    });
+        include: userInclude,
+      });
+    }
 
     let passwordValid = false;
     if (user) {
@@ -108,14 +172,14 @@ export async function POST(req: NextRequest) {
 
     if (!user || !passwordValid) {
       await recordLoginAttempt({
-        tenantSlug: businessKey,
+        tenantSlug: tenant.id,
         identifierHash,
         ipAddress,
         succeeded: false,
       });
       throw new AppError(
         "INVALID_CREDENTIALS",
-        "Incorrect business code, username/email/phone, or password",
+        "Incorrect business code, administrator/staff username, or password",
         401,
       );
     }
@@ -124,7 +188,7 @@ export async function POST(req: NextRequest) {
     if (roleCodes.length === 0) {
       throw new AppError(
         "ACCOUNT_NOT_READY",
-        "This staff account has no role assigned. Ask the administrator to update the staff account.",
+        "This account has no role assigned. Ask the administrator or operator to update it.",
         409,
       );
     }
@@ -174,7 +238,7 @@ export async function POST(req: NextRequest) {
     }
 
     await recordLoginAttempt({
-      tenantSlug: businessKey,
+      tenantSlug: tenant.id,
       identifierHash,
       ipAddress,
       succeeded: true,
@@ -212,7 +276,6 @@ export async function POST(req: NextRequest) {
       maxAge: 30 * 86400,
     });
 
-    // Remove the legacy narrow-path cookie so it cannot conflict with refresh rotation.
     response.cookies.set("tenant_refresh", "", {
       httpOnly: true,
       secure,
