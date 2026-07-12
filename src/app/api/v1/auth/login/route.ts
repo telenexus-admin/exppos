@@ -22,6 +22,12 @@ export async function POST(req: NextRequest) {
     const permissions = new Set(user.roles.flatMap((ur) => ur.role.rolePermissions.map((rp) => rp.permission.code as Permission)));
     const requestId = randomUUID(); const accessToken = await signAccessToken({ kind: "tenant", userId: user.id, tenantId: user.tenantId, branchIds: user.branches.map((b) => b.branchId), permissions, requestId });
     const refresh = newRefreshToken(); await db.userSession.create({ data: { userId: user.id, refreshTokenHash: refresh.hash, ipAddress: ip, deviceInfo: req.headers.get("user-agent"), expiresAt: new Date(Date.now() + 30 * 86400_000) } });
-    return NextResponse.json({ accessToken, refreshToken: refresh.raw, forcePasswordChange: user.forcePasswordChange, user: { id: user.id, name: user.fullName, tenant: user.tenant.name, permissions: [...permissions] } });
+    const roleCodes = user.roles.map((ur) => ur.role.code);
+    const destination = roleCodes.includes("TENANT_ADMIN") ? "/app/dashboard" : "/staff/dashboard";
+    const response = NextResponse.json({ ok: true, destination, forcePasswordChange: user.forcePasswordChange, user: { id: user.id, name: user.fullName, tenant: user.tenant.name, roles: roleCodes } });
+    const secure = process.env.APP_URL?.startsWith("https://") ?? false;
+    response.cookies.set("tenant_session", accessToken, { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: 15 * 60 });
+    response.cookies.set("tenant_refresh", refresh.raw, { httpOnly: true, secure, sameSite: "strict", path: "/api/v1/auth", maxAge: 30 * 86400 });
+    return response;
   } catch (error) { return apiError(error); }
 }
