@@ -7,6 +7,7 @@ import { AppError } from "@/lib/errors";
 import { appendAudit } from "@/server/audit/audit";
 import { apiError, tenantContext } from "@/server/http";
 import { requirePermission } from "@/server/security/context";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 
 const optionalNonNegativeNumber = z.preprocess(
   (value) => value === "" || value === null || value === undefined ? undefined : value,
@@ -19,7 +20,7 @@ const schema = z.object({
   mode: z.enum(["set", "add", "remove"]),
   quantity: z.coerce.number().finite().min(0, "Quantity cannot be negative"),
   reorderLevel: optionalNonNegativeNumber,
-  reason: z.string().trim().min(3, "Enter a reason for this stock change").max(240),
+  reason: z.string().trim().max(240).optional().default(""),
 });
 
 type AdjustmentResult = {
@@ -46,8 +47,18 @@ export async function POST(req: NextRequest) {
     requirePermission(ctx, "inventory.adjust");
 
     const body = schema.parse(await req.json());
-    const inputQuantity = new Prisma.Decimal(body.quantity);
+    const tenantSetting = await db.tenantSetting.findUnique({
+      where: { tenantId: ctx.tenantId },
+      select: { metadata: true },
+    });
+    const inventorySettings = normalizeTenantSettings(tenantSetting?.metadata).inventory;
+    const reason = body.reason.trim();
 
+    if (inventorySettings.requireAdjustmentReason && reason.length < 3) {
+      throw new AppError("ADJUSTMENT_REASON_REQUIRED", "Enter a reason for this stock change", 400);
+    }
+
+    const inputQuantity = new Prisma.Decimal(body.quantity);
     if (body.mode !== "set" && inputQuantity.lte(0)) {
       throw new AppError("INVALID_QUANTITY", "Enter a quantity greater than zero", 400);
     }
@@ -82,7 +93,7 @@ export async function POST(req: NextRequest) {
 
       const previousQuantity = existing?.quantity ?? new Prisma.Decimal(0);
       const reorderLevel = body.reorderLevel === undefined
-        ? existing?.reorderLevel ?? new Prisma.Decimal(0)
+        ? existing?.reorderLevel ?? new Prisma.Decimal(inventorySettings.defaultReorderLevel)
         : new Prisma.Decimal(body.reorderLevel);
       let nextQuantity: Prisma.Decimal;
 
@@ -90,7 +101,7 @@ export async function POST(req: NextRequest) {
       else if (body.mode === "add") nextQuantity = previousQuantity.plus(inputQuantity);
       else nextQuantity = previousQuantity.minus(inputQuantity);
 
-      if (nextQuantity.lt(0)) {
+      if (nextQuantity.lt(0) && !inventorySettings.allowNegativeStock) {
         throw new AppError(
           "INSUFFICIENT_STOCK",
           `Cannot remove ${inputQuantity.toString()}. Only ${previousQuantity.toString()} ${product.name} are available at ${branch.name}.`,
@@ -142,7 +153,7 @@ export async function POST(req: NextRequest) {
         quantity: nextQuantity.toString(),
         delta: delta.toString(),
         reorderLevel: reorderLevel.toString(),
-        reason: body.reason,
+        reason: reason || "Reason not required by business settings",
         mode: body.mode,
       };
     }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 20_000 });
