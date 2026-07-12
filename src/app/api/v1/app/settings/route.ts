@@ -6,10 +6,9 @@ import { AppError } from "@/lib/errors";
 import { appendAudit } from "@/server/audit/audit";
 import { apiError, tenantContext } from "@/server/http";
 import { requirePermission } from "@/server/security/context";
-import { PAYMENT_METHODS } from "@/server/settings/tenant-settings";
 
 const channelSchema = z.enum(["dashboard", "email", "whatsapp"]);
-const paymentMethodSchema = z.enum(PAYMENT_METHODS);
+const paymentMethodSchema = z.enum(["Cash", "Mobile Money", "Card", "Bank", "Credit"]);
 
 const schema = z.object({
   profile: z.object({
@@ -87,6 +86,7 @@ export async function PUT(req: NextRequest) {
     requirePermission(ctx, "settings.manage");
     const body = schema.parse(await req.json());
     const taxRate = new Prisma.Decimal(body.taxRatePercent).div(100);
+    const metadata = body.metadata as unknown as Prisma.InputJsonValue;
 
     const result = await db.$transaction(async (tx) => {
       const tenant = await tx.tenant.findUnique({ where: { id: ctx.tenantId } });
@@ -106,17 +106,8 @@ export async function PUT(req: NextRequest) {
 
       const setting = await tx.tenantSetting.upsert({
         where: { tenantId: ctx.tenantId },
-        update: {
-          receiptName: body.profile.receiptName,
-          taxRate,
-          metadata: body.metadata as Prisma.InputJsonValue,
-        },
-        create: {
-          tenantId: ctx.tenantId,
-          receiptName: body.profile.receiptName,
-          taxRate,
-          metadata: body.metadata as Prisma.InputJsonValue,
-        },
+        update: { receiptName: body.profile.receiptName, taxRate, metadata },
+        create: { tenantId: ctx.tenantId, receiptName: body.profile.receiptName, taxRate, metadata },
       });
 
       await appendAudit(tx, ctx, {
@@ -149,10 +140,7 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      settings: {
-        businessName: result.tenant.name,
-        updatedAt: result.setting.updatedAt,
-      },
+      settings: { businessName: result.tenant.name, updatedAt: result.setting.updatedAt },
     });
   } catch (error) {
     return apiError(error);
