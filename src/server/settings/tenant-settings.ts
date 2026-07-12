@@ -79,7 +79,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettingsMetadata = {
   },
   payments: {
     enabledMethods: ["Cash", "Mobile Money", "Card", "Bank"],
-    requireReferenceForNonCash: true,
+    requireReferenceForNonCash: false,
     allowSplitPayments: false,
     mpesaType: "Till",
     mpesaNumber: "",
@@ -178,7 +178,7 @@ export function normalizeTenantSettings(metadata: unknown): TenantSettingsMetada
     },
     payments: {
       enabledMethods: enabledMethods.length > 0 ? enabledMethods : ["Cash"],
-      requireReferenceForNonCash: bool(payments.requireReferenceForNonCash, true),
+      requireReferenceForNonCash: bool(payments.requireReferenceForNonCash, false),
       allowSplitPayments: bool(payments.allowSplitPayments, false),
       mpesaType: payments.mpesaType === "Paybill" ? "Paybill" : "Till",
       mpesaNumber: text(payments.mpesaNumber, ""),
