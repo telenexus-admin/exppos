@@ -52,41 +52,52 @@ export function AddStaffForm({
 
     const form = event.currentTarget;
     const data = new FormData(form);
-    const response = await fetch("/api/v1/app/staff", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        fullName: data.get("fullName"),
-        username: data.get("username"),
-        email: data.get("email"),
-        phone: data.get("phone"),
+
+    try {
+      const response = await fetch("/api/v1/app/staff", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fullName: data.get("fullName"),
+          username: data.get("username"),
+          email: data.get("email"),
+          phone: data.get("phone"),
+          password,
+          branchId: data.get("branchId"),
+          roleCode: data.get("roleCode"),
+        }),
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(body?.error?.message ?? "Unable to create this staff account.");
+        return;
+      }
+
+      if (!body?.staff?.username || !body?.staff?.businessCode) {
+        setError("The account was created, but its login details could not be displayed. Refresh the staff page to confirm the account.");
+        router.refresh();
+        return;
+      }
+
+      setCredentials({
+        fullName: body.staff.fullName,
+        businessCode: body.staff.businessCode,
+        username: body.staff.username,
         password,
-        branchId: data.get("branchId"),
-        roleCode: data.get("roleCode"),
-      }),
-    });
+        branch: body.staff.branch,
+        role: body.staff.role,
+        loginUrl: `${window.location.origin}/login`,
+      });
 
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setError(body?.error?.message ?? "Unable to create this staff account.");
+      form.reset();
+      setPassword(createTemporaryPassword());
+      router.refresh();
+    } catch {
+      setError("The server could not be reached. Check the connection and try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setCredentials({
-      fullName: body.staff.fullName,
-      businessCode: body.staff.businessCode,
-      username: body.staff.username,
-      password,
-      branch: body.staff.branch,
-      role: body.staff.role,
-      loginUrl: `${window.location.origin}/login`,
-    });
-
-    form.reset();
-    setPassword(createTemporaryPassword());
-    setLoading(false);
-    router.refresh();
   }
 
   async function copyCredentials() {
@@ -123,11 +134,11 @@ export function AddStaffForm({
         <div className="staff-form-grid">
           <label>
             Login username
-            <input name="username" placeholder="e.g. mary.w" required minLength={3} pattern="[A-Za-z0-9._-]+" autoComplete="off" disabled={limitReached} />
+            <input name="username" placeholder="e.g. mary.w" required minLength={3} maxLength={32} pattern="[A-Za-z0-9._-]+" autoComplete="off" disabled={limitReached} />
           </label>
           <label>
             Phone number
-            <input name="phone" placeholder="07..." autoComplete="off" disabled={limitReached} />
+            <input name="phone" placeholder="07..." maxLength={30} autoComplete="off" disabled={limitReached} />
           </label>
         </div>
 
@@ -158,7 +169,17 @@ export function AddStaffForm({
         <label>
           Temporary password
           <div className="password-field-row">
-            <input value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} required autoComplete="new-password" disabled={limitReached} />
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={12}
+              maxLength={128}
+              pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9]).{12,128}"
+              title="Use at least 12 characters with an uppercase letter, lowercase letter, and number."
+              required
+              autoComplete="new-password"
+              disabled={limitReached}
+            />
             <button type="button" onClick={() => setPassword(createTemporaryPassword())} disabled={limitReached}>Generate</button>
           </div>
         </label>

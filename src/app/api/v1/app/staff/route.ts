@@ -108,6 +108,22 @@ const schema = z.object({
   roleCode: z.enum(["CASHIER", "BRANCH_MANAGER", "INVENTORY_CLERK", "ACCOUNTANT"]),
 });
 
+type StaffResult = {
+  id: string;
+  fullName: string;
+  username: string;
+  email: string | null;
+  role: string;
+  roleCode: string;
+  branch: string;
+  branchId: string;
+  businessCode: string;
+};
+
+function isKnownPrismaError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+  return error instanceof Prisma.PrismaClientKnownRequestError;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const ctx = await tenantContext(req);
@@ -116,128 +132,190 @@ export async function POST(req: NextRequest) {
 
     const body = schema.parse(await req.json());
     const passwordHash = await hashSecret(body.password);
+    const template = roleTemplates[body.roleCode as RoleCode];
 
-    const result = await db.$transaction(async (tx) => {
-      const tenant = await tx.tenant.findUnique({
-        where: { id: ctx.tenantId },
-        include: { subscription: { include: { plan: true } } },
-      });
+    let result: StaffResult | undefined;
 
-      if (!tenant) throw new AppError("NOT_FOUND", "Business account was not found", 404);
-
-      const currentUsers = await tx.user.count({ where: { tenantId: ctx.tenantId } });
-      const maxUsers = tenant.subscription?.plan.maxUsers ?? 1;
-      if (currentUsers >= maxUsers) {
-        throw new AppError(
-          "PLAN_LIMIT_REACHED",
-          `Your current plan allows ${maxUsers} user${maxUsers === 1 ? "" : "s"}. Upgrade the plan before adding another staff member.`,
-          409,
-        );
-      }
-
-      const branch = await tx.branch.findFirst({
-        where: { id: body.branchId, tenantId: ctx.tenantId, status: "ACTIVE" },
-        select: { id: true, name: true },
-      });
-      if (!branch) throw new AppError("INVALID_BRANCH", "The selected branch is unavailable", 400);
-
-      const suppliedEmail = body.email?.trim().toLowerCase();
-      const loginEmail = suppliedEmail || `${body.username}@${tenant.slug}.staff.local`;
-
-      const conflict = await tx.user.findFirst({
-        where: {
-          tenantId: ctx.tenantId,
-          OR: [{ staffNumber: body.username }, { email: loginEmail }],
-        },
-        select: { staffNumber: true, email: true },
-      });
-
-      if (conflict?.staffNumber === body.username) {
-        throw new AppError("USERNAME_TAKEN", "That username is already in use", 409);
-      }
-      if (conflict?.email === loginEmail) {
-        throw new AppError("EMAIL_TAKEN", "That email address is already in use", 409);
-      }
-
-      const template = roleTemplates[body.roleCode as RoleCode];
-      let role = await tx.role.findFirst({
-        where: { tenantId: ctx.tenantId, code: body.roleCode },
-      });
-
-      if (!role) {
-        role = await tx.role.create({
-          data: {
-            tenantId: ctx.tenantId,
-            code: body.roleCode,
-            name: template.name,
-            isSystem: true,
-          },
-        });
-
-        const permissions = await tx.permission.findMany({
-          where: {
-            tenantId: ctx.tenantId,
-            code: { in: [...template.permissions] },
-            platformOnly: false,
-          },
-          select: { id: true },
-        });
-
-        if (permissions.length > 0) {
-          await tx.rolePermission.createMany({
-            data: permissions.map(({ id }) => ({ roleId: role!.id, permissionId: id })),
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        result = await db.$transaction(async (tx) => {
+          const tenant = await tx.tenant.findUnique({
+            where: { id: ctx.tenantId },
+            include: { subscription: { include: { plan: true } } },
           });
+
+          if (!tenant) throw new AppError("NOT_FOUND", "Business account was not found", 404);
+
+          const currentUsers = await tx.user.count({ where: { tenantId: ctx.tenantId } });
+          const maxUsers = tenant.subscription?.plan.maxUsers ?? 1;
+          if (currentUsers >= maxUsers) {
+            throw new AppError(
+              "PLAN_LIMIT_REACHED",
+              `Your current plan allows ${maxUsers} user${maxUsers === 1 ? "" : "s"}. Upgrade the plan before adding another staff member.`,
+              409,
+            );
+          }
+
+          const branch = await tx.branch.findFirst({
+            where: { id: body.branchId, tenantId: ctx.tenantId, status: "ACTIVE" },
+            select: { id: true, name: true },
+          });
+          if (!branch) throw new AppError("INVALID_BRANCH", "The selected branch is unavailable", 400);
+
+          const suppliedEmail = body.email?.trim().toLowerCase();
+          const loginEmail = suppliedEmail || `${body.username}@${tenant.slug}.staff.local`;
+
+          const conflict = await tx.user.findFirst({
+            where: {
+              tenantId: ctx.tenantId,
+              OR: [{ staffNumber: body.username }, { email: loginEmail }],
+            },
+            select: { staffNumber: true, email: true },
+          });
+
+          if (conflict?.staffNumber === body.username) {
+            throw new AppError("USERNAME_TAKEN", "That username is already in use", 409);
+          }
+          if (conflict?.email === loginEmail) {
+            throw new AppError("EMAIL_TAKEN", "That email address is already in use", 409);
+          }
+
+          const role = await tx.role.upsert({
+            where: {
+              tenantId_code: {
+                tenantId: ctx.tenantId,
+                code: body.roleCode,
+              },
+            },
+            update: {
+              name: template.name,
+              isSystem: true,
+            },
+            create: {
+              tenantId: ctx.tenantId,
+              code: body.roleCode,
+              name: template.name,
+              isSystem: true,
+            },
+          });
+
+          const permissions = await tx.permission.findMany({
+            where: {
+              tenantId: ctx.tenantId,
+              code: { in: [...template.permissions] },
+              platformOnly: false,
+            },
+            select: { id: true },
+          });
+
+          if (permissions.length > 0) {
+            await tx.rolePermission.createMany({
+              data: permissions.map(({ id }) => ({ roleId: role.id, permissionId: id })),
+              skipDuplicates: true,
+            });
+          }
+
+          const user = await tx.user.create({
+            data: {
+              tenantId: ctx.tenantId,
+              staffNumber: body.username,
+              fullName: body.fullName,
+              email: loginEmail,
+              phone: body.phone || null,
+              passwordHash,
+              status: "ACTIVE",
+              forcePasswordChange: true,
+            },
+          });
+
+          await tx.userRole.create({ data: { userId: user.id, roleId: role.id } });
+          await tx.userBranchAssignment.create({ data: { userId: user.id, branchId: branch.id } });
+
+          return {
+            id: user.id,
+            fullName: user.fullName,
+            username: user.staffNumber,
+            email: suppliedEmail || null,
+            role: role.name,
+            roleCode: role.code,
+            branch: branch.name,
+            branchId: branch.id,
+            businessCode: tenant.code,
+          };
+        }, {
+          isolationLevel: "Serializable",
+          maxWait: 10_000,
+          timeout: 20_000,
+        });
+
+        break;
+      } catch (error) {
+        if (isKnownPrismaError(error) && error.code === "P2034" && attempt < 3) {
+          continue;
         }
+        throw error;
       }
+    }
 
-      const user = await tx.user.create({
-        data: {
-          tenantId: ctx.tenantId,
-          staffNumber: body.username,
-          fullName: body.fullName,
-          email: loginEmail,
-          phone: body.phone || null,
-          passwordHash,
-          status: "ACTIVE",
-          forcePasswordChange: true,
-        },
-      });
+    if (!result) {
+      throw new AppError("STAFF_CREATE_FAILED", "The staff account could not be created. Please try again.", 503);
+    }
 
-      await tx.userRole.create({ data: { userId: user.id, roleId: role.id } });
-      await tx.userBranchAssignment.create({ data: { userId: user.id, branchId: branch.id } });
-
-      await appendAudit(tx, ctx, {
+    try {
+      await appendAudit(db, ctx, {
         action: "staff.created",
         entityType: "user",
-        entityId: user.id,
-        branchId: branch.id,
+        entityId: result.id,
+        branchId: result.branchId,
         newValues: {
-          fullName: user.fullName,
-          username: user.staffNumber,
-          email: suppliedEmail || null,
-          roleCode: role.code,
-          branchId: branch.id,
+          fullName: result.fullName,
+          username: result.username,
+          email: result.email,
+          roleCode: result.roleCode,
+          branchId: result.branchId,
         },
         ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
         deviceInfo: req.headers.get("user-agent") ?? undefined,
       });
-
-      return {
-        id: user.id,
-        fullName: user.fullName,
-        username: user.staffNumber,
-        email: suppliedEmail || null,
-        role: role.name,
-        branch: branch.name,
-        businessCode: tenant.code,
-      };
-    }, { isolationLevel: "Serializable" });
-
-    return NextResponse.json({ ok: true, staff: result }, { status: 201 });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return apiError(new AppError("DUPLICATE_STAFF", "The username or email is already in use", 409));
+    } catch (auditError) {
+      console.error("Staff account created but audit logging failed", {
+        requestId: ctx.requestId,
+        staffId: result.id,
+        auditError,
+      });
     }
+
+    return NextResponse.json({
+      ok: true,
+      staff: {
+        id: result.id,
+        fullName: result.fullName,
+        username: result.username,
+        email: result.email,
+        role: result.role,
+        branch: result.branch,
+        businessCode: result.businessCode,
+      },
+    }, { status: 201 });
+  } catch (error) {
+    if (isKnownPrismaError(error)) {
+      if (error.code === "P2002") {
+        return apiError(new AppError("DUPLICATE_STAFF", "The username or email is already in use", 409));
+      }
+
+      if (error.code === "P2028") {
+        return apiError(new AppError("DATABASE_TIMEOUT", "The database took too long to create the account. Please try again.", 503));
+      }
+
+      if (error.code === "P2003") {
+        return apiError(new AppError("INVALID_ASSIGNMENT", "The selected branch or role is no longer available", 409));
+      }
+
+      if (error.code === "P2034") {
+        return apiError(new AppError("DATABASE_BUSY", "The account could not be created because another update happened at the same time. Please try again.", 409));
+      }
+    }
+
     return apiError(error);
   }
 }

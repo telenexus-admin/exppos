@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
+import { ZodError } from "zod";
 import { AppError } from "@/lib/errors";
 import { verifyAccessToken } from "@/server/security/tokens";
 import type { Permission, TenantContext } from "@/server/security/context";
@@ -31,7 +32,29 @@ export async function tenantContext(req: NextRequest): Promise<TenantContext> {
 }
 
 export function apiError(error: unknown) {
+  if (error instanceof ZodError) {
+    const firstIssue = error.issues[0];
+    const field = firstIssue?.path.join(".");
+    const message = firstIssue?.message ?? "The submitted information is invalid";
+
+    return NextResponse.json(
+      {
+        error: {
+          code: "VALIDATION_ERROR",
+          message: field ? `${field}: ${message}` : message,
+          details: error.flatten(),
+        },
+      },
+      { status: 400 },
+    );
+  }
+
   const err = error instanceof AppError ? error : new AppError("INTERNAL_ERROR", "Unexpected server error", 500);
+
+  if (!(error instanceof AppError)) {
+    console.error("Unhandled API error", error);
+  }
+
   return NextResponse.json(
     { error: { code: err.code, message: err.message, details: err.details } },
     { status: err.status },
