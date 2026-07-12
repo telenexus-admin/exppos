@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -9,13 +8,9 @@ import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { apiError, tenantContext } from "@/server/http";
 import { requirePermission } from "@/server/security/context";
 
-const createBranchSchema = z.object({
+const schema = z.object({
   name: z.string().trim().min(2, "Enter a branch name").max(120),
-  code: z
-    .string()
-    .trim()
-    .min(2, "Enter a branch code")
-    .max(30)
+  code: z.string().trim().min(2, "Enter a branch code").max(30)
     .regex(/^[A-Za-z0-9_-]+$/, "Branch code may only contain letters, numbers, underscores, or hyphens")
     .transform((value) => value.toUpperCase()),
   email: z.union([z.string().trim().email("Enter a valid branch email"), z.literal("")]).optional(),
@@ -38,19 +33,11 @@ export async function GET(req: NextRequest) {
     const scope = await resolveTenantAccessScope(db, ctx);
 
     const branches = await db.branch.findMany({
-      where: {
-        tenantId: ctx.tenantId,
-        id: { in: scope.branchIds },
-      },
+      where: { tenantId: ctx.tenantId, id: { in: scope.branchIds } },
       orderBy: [{ isHeadOffice: "desc" }, { name: "asc" }],
       include: {
         _count: {
-          select: {
-            userAssignments: true,
-            inventories: true,
-            shifts: true,
-            sales: true,
-          },
+          select: { userAssignments: true, inventories: true, shifts: true, sales: true },
         },
       },
     });
@@ -66,28 +53,22 @@ export async function POST(req: NextRequest) {
     const ctx = await tenantContext(req);
     requirePermission(ctx, "branch.create");
     const scope = await resolveTenantAccessScope(db, ctx);
-
-    if (!scope.isTenantAdmin && !ctx.permissions.has("settings.manage")) {
+    if (!scope.isTenantAdmin) {
       throw new AppError("FORBIDDEN", "Only a tenant administrator can create a branch", 403);
     }
 
-    const body = createBranchSchema.parse(await req.json());
-
+    const body = schema.parse(await req.json());
     const result = await db.$transaction(async (tx) => {
       const tenant = await tx.tenant.findUnique({
         where: { id: ctx.tenantId },
         include: { subscription: { include: { plan: true } } },
       });
-
       if (!tenant) throw new AppError("NOT_FOUND", "Business account was not found", 404);
       if (!tenant.subscription?.plan) {
         throw new AppError("SUBSCRIPTION_REQUIRED", "An active plan is required before adding branches", 409);
       }
 
-      const branchCount = await tx.branch.count({
-        where: { tenantId: ctx.tenantId, status: { not: "SUSPENDED" } },
-      });
-
+      const branchCount = await tx.branch.count({ where: { tenantId: ctx.tenantId } });
       if (branchCount >= tenant.subscription.plan.maxBranches) {
         throw new AppError(
           "PLAN_LIMIT_REACHED",
@@ -96,8 +77,8 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const shouldBeHeadOffice = body.isHeadOffice || branchCount === 0;
-      if (shouldBeHeadOffice) {
+      const isHeadOffice = body.isHeadOffice || branchCount === 0;
+      if (isHeadOffice) {
         await tx.branch.updateMany({
           where: { tenantId: ctx.tenantId, isHeadOffice: true },
           data: { isHeadOffice: false },
@@ -115,27 +96,22 @@ export async function POST(req: NextRequest) {
           town: body.town?.trim() || null,
           county: body.county?.trim() || null,
           timezone: body.timezone,
-          isHeadOffice: shouldBeHeadOffice,
+          isHeadOffice,
           status: "ACTIVE",
         },
       });
 
-      const tenantAdmins = await tx.user.findMany({
+      const admins = await tx.user.findMany({
         where: {
           tenantId: ctx.tenantId,
           status: "ACTIVE",
-          roles: {
-            some: {
-              role: { tenantId: ctx.tenantId, code: "TENANT_ADMIN" },
-            },
-          },
+          roles: { some: { role: { tenantId: ctx.tenantId, code: "TENANT_ADMIN" } } },
         },
         select: { id: true },
       });
-
-      if (tenantAdmins.length > 0) {
+      if (admins.length > 0) {
         await tx.userBranchAssignment.createMany({
-          data: tenantAdmins.map(({ id }) => ({ userId: id, branchId: branch.id })),
+          data: admins.map(({ id }) => ({ userId: id, branchId: branch.id })),
           skipDuplicates: true,
         });
       }
@@ -159,19 +135,15 @@ export async function POST(req: NextRequest) {
       return branch;
     }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 20_000 });
 
-    return NextResponse.json(
-      {
-        ok: true,
-        branch: {
-          id: result.id,
-          code: result.code,
-          name: result.name,
-          isHeadOffice: result.isHeadOffice,
-          reference: randomUUID(),
-        },
+    return NextResponse.json({
+      ok: true,
+      branch: {
+        id: result.id,
+        code: result.code,
+        name: result.name,
+        isHeadOffice: result.isHeadOffice,
       },
-      { status: 201 },
-    );
+    }, { status: 201 });
   } catch (error) {
     if (knownPrismaError(error)) {
       if (error.code === "P2002") {
