@@ -78,7 +78,7 @@ export const DEFAULT_TENANT_SETTINGS: TenantSettingsMetadata = {
     autoPrintReceipt: false,
   },
   payments: {
-    enabledMethods: ["Cash", "Mobile Money"],
+    enabledMethods: ["Cash", "Mobile Money", "Card", "Bank"],
     requireReferenceForNonCash: true,
     allowSplitPayments: false,
     mpesaType: "Till",
