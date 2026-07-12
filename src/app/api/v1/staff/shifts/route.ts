@@ -3,8 +3,9 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { appendAudit } from "@/server/audit/audit";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { apiError, tenantContext } from "@/server/http";
-import { requireBranch, requirePermission } from "@/server/security/context";
+import { requirePermission } from "@/server/security/context";
 
 const schema = z.object({
   branchId: z.string().min(1),
@@ -16,19 +17,32 @@ export async function POST(req: NextRequest) {
     const ctx = await tenantContext(req);
     requirePermission(ctx, "shift.open");
     const input = schema.parse(await req.json());
-    requireBranch(ctx, input.branchId);
+    const scope = await resolveTenantAccessScope(db, ctx);
+
+    if (!scope.branchIds.includes(input.branchId)) {
+      throw new AppError("BRANCH_FORBIDDEN", "This account is not assigned to the selected branch", 403);
+    }
 
     const shift = await db.$transaction(async (tx) => {
       const [branch, existing] = await Promise.all([
-        tx.branch.findFirst({ where: { id: input.branchId, tenantId: ctx.tenantId, status: "ACTIVE" } }),
-        tx.shift.findFirst({ where: { tenantId: ctx.tenantId, userId: ctx.userId, status: "OPEN" } }),
+        tx.branch.findFirst({
+          where: { id: input.branchId, tenantId: ctx.tenantId, status: "ACTIVE" },
+        }),
+        tx.shift.findFirst({
+          where: { tenantId: ctx.tenantId, userId: ctx.userId, status: "OPEN" },
+        }),
       ]);
 
       if (!branch) throw new AppError("INVALID_BRANCH", "The assigned branch is unavailable", 400);
       if (existing) throw new AppError("SHIFT_ALREADY_OPEN", "You already have an open shift", 409);
 
       const created = await tx.shift.create({
-        data: { tenantId: ctx.tenantId, branchId: branch.id, userId: ctx.userId, openingCash: input.openingCash },
+        data: {
+          tenantId: ctx.tenantId,
+          branchId: branch.id,
+          userId: ctx.userId,
+          openingCash: input.openingCash,
+        },
       });
 
       await appendAudit(tx, ctx, {
@@ -44,7 +58,10 @@ export async function POST(req: NextRequest) {
       return created;
     }, { isolationLevel: "Serializable" });
 
-    return NextResponse.json({ ok: true, shift: { id: shift.id, openedAt: shift.openedAt } }, { status: 201 });
+    return NextResponse.json(
+      { ok: true, shift: { id: shift.id, openedAt: shift.openedAt } },
+      { status: 201 },
+    );
   } catch (error) {
     return apiError(error);
   }

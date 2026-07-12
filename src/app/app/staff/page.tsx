@@ -2,10 +2,12 @@ import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { requirePermission } from "@/server/security/context";
 import { AddStaffForm } from "./add-staff-form";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function initials(name: string) {
   return name
@@ -19,45 +21,69 @@ function initials(name: string) {
 export default async function StaffPage() {
   const session = await requireCurrentTenant();
   requirePermission(session, "staff.view");
+  const scope = await resolveTenantAccessScope(db, session);
 
-  const [viewer, tenant, branches, staff] = await Promise.all([
-    db.user.findFirst({
-      where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" },
-      include: { roles: { include: { role: true } } },
-    }),
+  const [tenant, branches, staff] = await Promise.all([
     db.tenant.findUnique({
       where: { id: session.tenantId },
       include: { subscription: { include: { plan: true } } },
     }),
     db.branch.findMany({
-      where: { tenantId: session.tenantId, status: "ACTIVE" },
+      where: {
+        tenantId: session.tenantId,
+        status: "ACTIVE",
+        id: { in: scope.branchIds },
+      },
       select: { id: true, name: true, code: true },
       orderBy: [{ isHeadOffice: "desc" }, { name: "asc" }],
     }),
     db.user.findMany({
-      where: { tenantId: session.tenantId },
+      where: {
+        tenantId: session.tenantId,
+        ...(scope.isTenantAdmin
+          ? {}
+          : {
+              branches: {
+                some: {
+                  branchId: { in: scope.branchIds },
+                  branch: { tenantId: session.tenantId },
+                },
+              },
+            }),
+      },
       include: {
-        roles: { include: { role: true } },
-        branches: { include: { branch: true } },
+        roles: {
+          where: { role: { tenantId: session.tenantId } },
+          include: { role: true },
+        },
+        branches: {
+          where: { branch: { tenantId: session.tenantId } },
+          include: { branch: true },
+        },
       },
       orderBy: { createdAt: "desc" },
     }),
   ]);
 
-  if (!viewer || !tenant) redirect("/login");
+  if (!tenant) redirect("/login");
 
-  const viewerRole = viewer.roles.map(({ role }) => role.name).join(", ") || "Tenant user";
+  const viewerRole = scope.roleNames.join(", ") || "Tenant user";
   const maxUsers = tenant.subscription?.plan.maxUsers ?? 1;
 
   return (
-    <PortalShell title="Staff management" role={viewerRole} current="staff" branchName={tenant.name}>
+    <PortalShell title="Staff management" role={viewerRole} current="staff" branchName={`${tenant.name} · ${tenant.code}`}>
+      <div className="tenant-isolation-notice">
+        <strong>{tenant.name}</strong>
+        <span>Tenant code {tenant.code} · Only this account&apos;s staff and branch assignments are displayed.</span>
+      </div>
+
       <div className="staff-layout">
         <article className="staff-panel">
           <div className="staff-panel-head">
             <div>
               <small>TEAM DIRECTORY</small>
               <h3>Staff accounts</h3>
-              <p>Manage staff login usernames, roles, and branch allocation.</p>
+              <p>Manage staff login usernames, roles, and branch allocation for {tenant.name}.</p>
             </div>
             <span className="staff-count-badge">{staff.length} / {maxUsers} users</span>
           </div>
