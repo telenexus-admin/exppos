@@ -87,6 +87,9 @@ export default async function PosPage() {
     taxEnabled: settings.taxReceipt.taxEnabled,
     pricesIncludeTax: settings.taxReceipt.pricesIncludeTax,
     showTaxBreakdown: settings.taxReceipt.showTaxBreakdown,
+    mpesaType: settings.payments.mpesaType,
+    mpesaNumber: settings.payments.mpesaNumber,
+    mpesaAccountInstructions: settings.payments.mpesaAccountInstructions,
   };
 
   return (
