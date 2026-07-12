@@ -4,6 +4,7 @@ import "@fontsource/manrope/600.css";
 import "@fontsource/manrope/700.css";
 import "@fontsource/manrope/800.css";
 import "./styles.css";
+import "./portal.css";
 
 export const metadata = { title: "Speedyhive Cloud POS", description: "Secure multi-tenant POS management" };
 export default function RootLayout({ children }: { children: ReactNode }) {
