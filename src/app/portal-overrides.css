@@ -1,16 +1,123 @@
+.portal-mobile-backdrop,
+.portal-mobile-close {
+  display: none;
+}
+
 @media (max-width: 820px) {
-  .portal .portal-sidebar {
-    display: flex;
+  .portal .portal-sidebar,
+  .portal--collapsed .portal-sidebar {
+    display: flex !important;
+    width: min(286px, calc(100vw - 56px));
+    padding: 18px 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    transform: translateX(-105%);
+    transition: transform 180ms ease, box-shadow 180ms ease;
+    box-shadow: none;
+    z-index: 90;
+  }
+
+  .portal.portal--mobile-open .portal-sidebar {
+    transform: translateX(0);
+    box-shadow: 20px 0 45px rgba(0, 0, 0, .28);
+  }
+
+  .portal .workspace,
+  .portal--collapsed .workspace {
+    margin-left: 0;
+  }
+
+  .portal .workspace > header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    min-height: 66px;
+    background: rgba(238, 243, 240, .96);
+    padding: 10px 0;
+    backdrop-filter: blur(10px);
+  }
+
+  .portal .portal-mobile-toggle {
+    display: grid !important;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    border-color: #bfcfc8;
+    background: #fff;
+    color: #102f25;
+    box-shadow: 0 5px 18px rgba(18, 45, 36, .12);
+    position: relative;
+    z-index: 60;
+  }
+
+  .portal .portal-mobile-toggle svg,
+  .portal .portal-mobile-close svg {
+    width: 21px;
+    height: 21px;
   }
 
   .portal .portal-collapse-button {
+    display: none !important;
+  }
+
+  .portal .portal-mobile-close {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    place-items: center;
+    border: 1px solid #315247;
+    border-radius: 10px;
+    background: #143128;
+    color: #effff8;
+    padding: 0;
+  }
+
+  .portal-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: rgba(4, 16, 12, .58);
+    padding: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+  }
+
+  .portal--mobile-open .portal-mobile-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .portal--collapsed .portal-sidebar-head {
+    flex-direction: row;
+  }
+
+  .portal--collapsed .portal-brand {
+    justify-content: flex-start;
+  }
+
+  .portal--collapsed .portal-sidebar nav a {
+    justify-content: flex-start;
+    padding: 10px 12px;
+  }
+
+  .portal--collapsed .portal-profile {
+    justify-content: flex-start;
+  }
+
+  .portal--mobile-open .portal-brand-copy,
+  .portal--mobile-open .portal-profile-copy {
     display: grid;
   }
 
-  .portal--collapsed .portal-sidebar {
-    width: 0;
-    padding-inline: 0;
-    overflow: hidden;
+  .portal--mobile-open .portal-nav-label {
+    display: inline;
   }
 }
 
