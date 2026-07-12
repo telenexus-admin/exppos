@@ -1,2 +1,82 @@
-const products=["Premium Coffee","Wireless Keyboard","USB-C Cable","Thermal Paper","Desk Organizer","HDMI Adapter"];
-export default function Pos(){return <main className="pos"><header><a className="brand" href="/app/dashboard">Speedyhive<span>Head Office · Till 03</span></a><input placeholder="Scan barcode or search products…" autoFocus/><div className="cashier"><span className="status-dot"/>Cashier One</div></header><section className="catalog"><div className="category-row">{["All items","Popular","Electronics","Accessories","Services"].map((x,i)=><button className={i===0?"active":""}>{x}</button>)}</div><div className="product-grid">{products.map((x,i)=><button className="product"><span>{x[0]}</span><strong>{x}</strong><small>KES {(i+1)*450}.00</small><em>{i+3} in stock</em></button>)}</div></section><aside className="cart"><div className="cart-head"><div><small>CURRENT ORDER</small><h2>Walk-in customer</h2></div><button>+ Customer</button></div>{products.slice(0,3).map((x,i)=><div className="cart-item"><span>{i+1}</span><div><strong>{x}</strong><small>1 × KES {(i+1)*450}.00</small></div><b>KES {(i+1)*450}.00</b></div>)}<div className="totals"><p><span>Subtotal</span><b>KES 2,700.00</b></p><p><span>Tax</span><b>KES 432.00</b></p><p className="grand"><span>Total</span><b>KES 3,132.00</b></p></div><div className="pay-actions"><button>Hold cart</button><button className="primary">Pay KES 3,132</button></div></aside></main>}
+import { redirect } from "next/navigation";
+import { db } from "@/lib/db";
+import { requireCurrentTenant } from "@/server/auth/current-tenant";
+import { requirePermission } from "@/server/security/context";
+import { PosTerminal, type PosProduct } from "@/components/pos-terminal";
+
+export const dynamic = "force-dynamic";
+
+export default async function PosPage() {
+  const session = await requireCurrentTenant();
+  requirePermission(session, "product.view");
+  requirePermission(session, "inventory.view");
+
+  const user = await db.user.findFirst({
+    where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" },
+    include: {
+      tenant: true,
+      roles: { include: { role: true } },
+      branches: { include: { branch: true } },
+    },
+  });
+
+  if (!user) redirect("/login");
+
+  const openShift = await db.shift.findFirst({
+    where: {
+      tenantId: session.tenantId,
+      userId: session.userId,
+      branchId: { in: [...session.branchIds] },
+      status: "OPEN",
+    },
+    include: { branch: true },
+    orderBy: { openedAt: "desc" },
+  });
+
+  const assignedBranches = user.branches
+    .map((assignment) => assignment.branch)
+    .filter((branch) => branch.tenantId === session.tenantId && branch.status === "ACTIVE");
+  const activeBranch = openShift?.branch ?? assignedBranches[0] ?? null;
+
+  const inventory = activeBranch
+    ? await db.branchInventory.findMany({
+        where: {
+          tenantId: session.tenantId,
+          branchId: activeBranch.id,
+          product: { tenantId: session.tenantId, status: "active" },
+        },
+        include: { product: { include: { category: true } } },
+      })
+    : [];
+
+  const products: PosProduct[] = inventory
+    .map((row) => ({
+      id: row.product.id,
+      name: row.product.name,
+      sku: row.product.sku,
+      barcode: row.product.barcode,
+      category: row.product.category?.name ?? "Uncategorized",
+      price: Number(row.product.sellingPrice),
+      taxRate: Number(row.product.taxRate),
+      quantity: Number(row.quantity),
+      trackStock: row.product.trackStock,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  const roleCodes = user.roles.map(({ role }) => role.code);
+  const returnPath = roleCodes.includes("TENANT_ADMIN") ? "/app/dashboard" : "/staff/dashboard";
+  const canSell = session.permissions.has("sale.create") && session.permissions.has("payment.receive");
+
+  return (
+    <PosTerminal
+      products={products}
+      branchId={activeBranch?.id ?? null}
+      branchName={activeBranch?.name ?? "No branch assigned"}
+      shiftId={openShift?.id ?? null}
+      cashierName={user.fullName}
+      currency={user.tenant.currency || "KES"}
+      canSell={canSell}
+      returnPath={returnPath}
+    />
+  );
+}
