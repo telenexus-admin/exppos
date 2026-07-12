@@ -5,7 +5,7 @@ import type { OperatorContext } from "@/server/security/context";
 
 export type OnboardTenantInput = {
   code: string; slug: string; name: string; legalName?: string; email: string; phone: string;
-  currency: string; timezone: string; receiptName: string; planId: string;
+  currency: string; timezone: string; receiptName: string; planId: string; status: "TRIAL" | "ACTIVE";
   trialEndsAt?: Date; branch: { code: string; name: string; email?: string; phone?: string; address?: string };
   admin: { fullName: string; email: string; phone?: string; temporaryPassword: string; pin: string };
 };
@@ -16,9 +16,9 @@ export async function onboardTenant(db: PrismaClient, ctx: OperatorContext, inpu
     const plan = await tx.subscriptionPlan.findFirstOrThrow({ where: { id: input.planId, active: true } });
     const tenant = await tx.tenant.create({ data: {
       code: input.code, slug: input.slug, name: input.name, legalName: input.legalName,
-      email: input.email, phone: input.phone, currency: input.currency, timezone: input.timezone,
+      email: input.email, phone: input.phone, currency: input.currency, timezone: input.timezone, status: input.status,
     }});
-    await tx.tenantSubscription.create({ data: { tenantId: tenant.id, planId: plan.id, status: "TRIAL", trialStartsAt: new Date(), trialEndsAt: input.trialEndsAt } });
+    await tx.tenantSubscription.create({ data: { tenantId: tenant.id, planId: plan.id, status: input.status, trialStartsAt: input.status === "TRIAL" ? new Date() : null, trialEndsAt: input.status === "TRIAL" ? input.trialEndsAt : null, startsAt: input.status === "ACTIVE" ? new Date() : null } });
     await tx.tenantSetting.create({ data: { tenantId: tenant.id, receiptName: input.receiptName } });
     const branch = await tx.branch.create({ data: { tenantId: tenant.id, code: input.branch.code, name: input.branch.name, email: input.branch.email, phone: input.branch.phone, address: input.branch.address, timezone: input.timezone, isHeadOffice: true } });
     const role = await tx.role.create({ data: { tenantId: tenant.id, code: "TENANT_ADMIN", name: "Tenant Administrator", isSystem: true } });
