@@ -9,6 +9,19 @@ import { requirePermission } from "@/server/security/context";
 
 const channelSchema = z.enum(["dashboard", "email", "whatsapp"]);
 const paymentMethodSchema = z.enum(["Cash", "Mobile Money", "Card", "Bank", "Credit"]);
+const timezoneSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(80)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Enter a valid timezone such as Africa/Nairobi");
 
 const schema = z.object({
   profile: z.object({
@@ -17,7 +30,7 @@ const schema = z.object({
     email: z.string().trim().email().max(200),
     phone: z.string().trim().min(7).max(40),
     currency: z.string().trim().length(3).transform((value) => value.toUpperCase()),
-    timezone: z.string().trim().min(3).max(80),
+    timezone: timezoneSchema,
     receiptName: z.string().trim().min(2).max(160),
   }),
   taxRatePercent: z.coerce.number().finite().min(0).max(100),
