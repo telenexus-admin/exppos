@@ -93,17 +93,30 @@ const schema = z.object({
   }),
 });
 
+function jsonObject(value: Prisma.JsonValue | null | undefined): Prisma.JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Prisma.JsonObject
+    : {};
+}
+
 export async function PUT(req: NextRequest) {
   try {
     const ctx = await tenantContext(req);
     requirePermission(ctx, "settings.manage");
     const body = schema.parse(await req.json());
     const taxRate = new Prisma.Decimal(body.taxRatePercent).div(100);
-    const metadata = body.metadata as unknown as Prisma.InputJsonValue;
 
     const result = await db.$transaction(async (tx) => {
-      const tenant = await tx.tenant.findUnique({ where: { id: ctx.tenantId } });
+      const tenant = await tx.tenant.findUnique({
+        where: { id: ctx.tenantId },
+        include: { settings: { select: { metadata: true } } },
+      });
       if (!tenant) throw new AppError("NOT_FOUND", "Business account was not found", 404);
+
+      const metadata = {
+        ...jsonObject(tenant.settings?.metadata),
+        ...body.metadata,
+      } as unknown as Prisma.InputJsonValue;
 
       const updatedTenant = await tx.tenant.update({
         where: { id: ctx.tenantId },
