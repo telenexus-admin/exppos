@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 type IconName =
   | "dashboard"
@@ -20,6 +20,7 @@ type IconName =
   | "settings"
   | "bell"
   | "menu"
+  | "close"
   | "collapse";
 
 type NavigationItem = {
@@ -79,6 +80,7 @@ function PortalIcon({ name }: { name: IconName }) {
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.36.24.72.6.6 1v4c.12.4-.24.76-.6 1Z" /></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     menu: <><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></>,
+    close: <><path d="M5 5l14 14" /><path d="M19 5 5 19" /></>,
     collapse: <><path d="M15 18l-6-6 6-6" /><path d="M21 4v16" /></>,
   };
 
@@ -101,13 +103,35 @@ export function PortalShell({
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const sections = basePath === "/staff" ? staffSections : tenantSections;
 
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    const desktopQuery = window.matchMedia("(min-width: 821px)");
+    const closeOnDesktop = (event: MediaQueryListEvent) => {
+      if (event.matches) setMobileOpen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+
+    if (mobileOpen) document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    desktopQuery.addEventListener("change", closeOnDesktop);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+      desktopQuery.removeEventListener("change", closeOnDesktop);
+    };
+  }, [mobileOpen]);
+
   return (
-    <div className={`portal${collapsed ? " portal--collapsed" : ""}`}>
-      <aside className="portal-sidebar">
+    <div className={`portal${collapsed ? " portal--collapsed" : ""}${mobileOpen ? " portal--mobile-open" : ""}`}>
+      <aside className="portal-sidebar" id="portal-navigation">
         <div className="portal-sidebar-head">
-          <a className="brand portal-brand" href={`${basePath}/dashboard`}>
+          <a className="brand portal-brand" href={`${basePath}/dashboard`} onClick={() => setMobileOpen(false)}>
             <span className="portal-brand-mark">SH</span>
             <span className="portal-brand-copy">Speedyhive<small>Cloud POS</small></span>
           </a>
@@ -119,11 +143,25 @@ export function PortalShell({
           >
             <PortalIcon name="collapse" />
           </button>
+          <button
+            aria-label="Close navigation"
+            className="portal-mobile-close"
+            onClick={() => setMobileOpen(false)}
+            type="button"
+          >
+            <PortalIcon name="close" />
+          </button>
         </div>
 
         <nav aria-label="Main navigation">
           {sections.map((item) => (
-            <a className={current === item.slug ? "active" : ""} href={item.href} key={item.slug} title={collapsed ? item.label : undefined}>
+            <a
+              className={current === item.slug ? "active" : ""}
+              href={item.href}
+              key={item.slug}
+              onClick={() => setMobileOpen(false)}
+              title={collapsed ? item.label : undefined}
+            >
               <span className="portal-nav-icon"><PortalIcon name={item.icon} /></span>
               <span className="portal-nav-label">{item.label}</span>
             </a>
@@ -136,16 +174,26 @@ export function PortalShell({
         </div>
       </aside>
 
+      <button
+        aria-label="Close navigation"
+        className="portal-mobile-backdrop"
+        onClick={() => setMobileOpen(false)}
+        tabIndex={mobileOpen ? 0 : -1}
+        type="button"
+      />
+
       <section className="workspace">
         <header>
           <div className="portal-title-row">
             <button
-              aria-label={collapsed ? "Open navigation" : "Close navigation"}
+              aria-controls="portal-navigation"
+              aria-expanded={mobileOpen}
+              aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
               className="portal-mobile-toggle"
-              onClick={() => setCollapsed((value) => !value)}
+              onClick={() => setMobileOpen((value) => !value)}
               type="button"
             >
-              <PortalIcon name="menu" />
+              <PortalIcon name={mobileOpen ? "close" : "menu"} />
             </button>
             <div><small>{branchName}</small><h2>{title}</h2></div>
           </div>
