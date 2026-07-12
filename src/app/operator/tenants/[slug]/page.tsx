@@ -1,13 +1,13 @@
 import { notFound } from "next/navigation";
-import { OperatorShell } from "@/components/operator-shell";
-import { OperatorActionButton } from "@/components/operator-action-button";
 import { DeleteTenantButton } from "@/components/delete-tenant-button";
+import { OperatorActionButton } from "@/components/operator-action-button";
+import { OperatorShell } from "@/components/operator-shell";
 import { ResetTenantAdminPassword } from "@/components/reset-tenant-admin-password";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export default async function Page({
+export default async function TenantDetails({
   params,
   searchParams,
 }: {
@@ -16,17 +16,14 @@ export default async function Page({
 }) {
   const { slug } = await params;
   const query = await searchParams;
+
   const tenant = await db.tenant.findFirst({
     where: { slug, status: { not: "CANCELLED" } },
     include: {
       subscription: { include: { plan: true } },
       users: {
         where: {
-          roles: {
-            some: {
-              role: { tenantId: undefined, code: "TENANT_ADMIN" },
-            },
-          },
+          roles: { some: { role: { code: "TENANT_ADMIN" } } },
         },
         select: {
           id: true,
@@ -35,7 +32,6 @@ export default async function Page({
           phone: true,
           staffNumber: true,
           status: true,
-          forcePasswordChange: true,
           lastLoginAt: true,
           createdAt: true,
         },
@@ -66,9 +62,7 @@ export default async function Page({
         <div>
           <p>{tenant.code} · {tenant.slug}</p>
           <h2>{tenant.name}</h2>
-          <span className={`tenant-status ${tenant.status.toLowerCase().replace("_", "-")}`}>
-            {status}
-          </span>
+          <span className={`tenant-status ${tenant.status.toLowerCase().replace("_", "-")}`}>{status}</span>
         </div>
         <div className="tenant-controls">
           {admin && <ResetTenantAdminPassword tenantId={tenant.id} adminName={admin.fullName} />}
@@ -84,21 +78,14 @@ export default async function Page({
           ["Staff users", String(tenant._count.users), "Created accounts"],
           ["Transactions", String(tenant._count.sales), "All time"],
         ].map(([label, value, note]) => (
-          <article key={label}>
-            <small>{label}</small>
-            <strong>{value}</strong>
-            <span>{note}</span>
-          </article>
+          <article key={label}><small>{label}</small><strong>{value}</strong><span>{note}</span></article>
         ))}
       </div>
 
       <div className="operator-grid">
         <article className="operator-card wide operator-login-credentials-card">
           <div className="operator-card-head">
-            <div>
-              <small>ADMIN LOGIN</small>
-              <h2>First administrator credentials</h2>
-            </div>
+            <div><small>ADMIN LOGIN</small><h2>First administrator credentials</h2></div>
             <a
               className="manage-link"
               href={`/api/v1/operator/tenants/${tenant.id}/open-login`}
@@ -119,14 +106,13 @@ export default async function Page({
                 <div><dt>Administrator phone</dt><dd>{admin.phone ?? "Not provided"}</dd></div>
                 <div><dt>Business email alias</dt><dd>{tenant.email}</dd></div>
               </dl>
-
               <div className="operator-login-instructions">
                 <strong>How the administrator should sign in</strong>
                 <span>First field: {tenant.code}, {tenant.slug}, or {tenant.email}</span>
                 <span>Second field: {admin.email}, {admin.staffNumber}, {admin.phone ?? "administrator phone"}, or {tenant.email}</span>
                 <span>Third field: the temporary password entered during onboarding.</span>
                 <small>
-                  “Open isolated client login” clears any previous tenant session first, preventing one client&apos;s staff or sales from appearing in another client&apos;s dashboard.
+                  Open isolated client login clears the previous tenant session before this client signs in, preventing data from another account being displayed.
                 </small>
               </div>
             </>
@@ -152,24 +138,10 @@ export default async function Page({
         </article>
 
         <article className="operator-card">
-          <div className="operator-card-head">
-            <div><small>ACCOUNT</small><h2>Tenant state</h2></div>
-          </div>
-          <div className="activity-item">
-            <i />
-            <div>
-              <strong>{status}</strong>
-              <small>Created {tenant.createdAt.toLocaleDateString("en-KE")}</small>
-            </div>
-          </div>
+          <div className="operator-card-head"><div><small>ACCOUNT</small><h2>Tenant state</h2></div></div>
+          <div className="activity-item"><i /><div><strong>{status}</strong><small>Created {tenant.createdAt.toLocaleDateString("en-KE")}</small></div></div>
           {admin && (
-            <div className="activity-item">
-              <i />
-              <div>
-                <strong>{admin.lastLoginAt ? "Administrator has logged in" : "Administrator has not logged in"}</strong>
-                <small>{admin.lastLoginAt ? admin.lastLoginAt.toLocaleString("en-KE") : "Waiting for first successful login"}</small>
-              </div>
-            </div>
+            <div className="activity-item"><i /><div><strong>{admin.lastLoginAt ? "Administrator has logged in" : "Administrator has not logged in"}</strong><small>{admin.lastLoginAt ? admin.lastLoginAt.toLocaleString("en-KE") : "Waiting for first successful login"}</small></div></div>
           )}
         </article>
       </div>
