@@ -18,7 +18,13 @@ type LoginResponse = {
   };
 };
 
-export function TenantLoginForm() {
+export function TenantLoginForm({
+  initialBusinessKey = "",
+  switching = false,
+}: {
+  initialBusinessKey?: string;
+  switching?: boolean;
+}) {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
@@ -125,6 +131,12 @@ export function TenantLoginForm() {
         slug, or business email, then the administrator email/username and temporary password.
       </p>
 
+      {switching && (
+        <p className="tenant-switch-notice" role="status">
+          The previous business session was cleared. You are now signing in to a different tenant account.
+        </p>
+      )}
+
       <label>
         Business code, slug, or business email
         <input
@@ -136,6 +148,7 @@ export function TenantLoginForm() {
           autoCapitalize="none"
           spellCheck={false}
           disabled={loading}
+          defaultValue={initialBusinessKey}
         />
       </label>
 
@@ -143,7 +156,7 @@ export function TenantLoginForm() {
         Administrator/staff username, email, or phone
         <input
           name="identifier"
-          placeholder="STAFF-000001 or admin@company.com"
+          placeholder="STAFF-000001 or admin@business.com"
           required
           minLength={3}
           autoComplete="username"
