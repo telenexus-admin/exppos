@@ -8,24 +8,19 @@ import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const NAIROBI_TIMEZONE = "Africa/Nairobi";
-
 function nairobiDayRange(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: NAIROBI_TIMEZONE,
+    timeZone: "Africa/Nairobi",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).formatToParts(now);
-
   const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
   const start = new Date(`${values.year}-${values.month}-${values.day}T00:00:00+03:00`);
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-
-  return { start, end };
+  return { start, end: new Date(start.getTime() + 86_400_000) };
 }
 
-function formatMoney(value: number, currency: string) {
+function money(value: number, currency: string) {
   try {
     return new Intl.NumberFormat("en-KE", {
       style: "currency",
@@ -38,54 +33,47 @@ function formatMoney(value: number, currency: string) {
   }
 }
 
-function formatQuantity(value: number) {
-  return new Intl.NumberFormat("en-KE", { maximumFractionDigits: 3 }).format(value);
-}
-
 export default async function Dashboard() {
   const session = await requireCurrentTenant();
   const scope = await resolveTenantAccessScope(db, session);
-  const branchIds = scope.branchIds;
   const { start, end } = nairobiDayRange();
 
   const user = await db.user.findFirst({
-    where: {
-      id: session.userId,
-      tenantId: session.tenantId,
-      status: "ACTIVE",
-    },
-    include: {
-      tenant: true,
-      roles: {
-        where: { role: { tenantId: session.tenantId } },
-        include: { role: true },
-      },
-    },
+    where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" },
+    include: { tenant: true },
   });
-
   if (!user) redirect("/login");
 
-  const [sales, activeShifts, inventoryRows, outstandingInvoices, recentSales] = await Promise.all([
+  const branchIds = scope.branchIds;
+  const saleWhere = {
+    tenantId: session.tenantId,
+    branchId: { in: branchIds },
+    status: "COMPLETED" as const,
+  };
+
+  const [todaySales, recentSales, activeShifts, inventoryRows, invoices] = await Promise.all([
     db.sale.findMany({
-      where: {
-        tenantId: session.tenantId,
-        branchId: { in: branchIds },
-        status: "COMPLETED",
-        createdAt: { gte: start, lt: end },
-      },
-      select: {
-        createdAt: true,
-        total: true,
+      where: { ...saleWhere, createdAt: { gte: start, lt: end } },
+      include: {
         items: {
-          select: {
-            quantity: true,
-            unitCost: true,
-            total: true,
-            tax: true,
-          },
+          select: { quantity: true, unitCost: true, total: true, tax: true },
         },
       },
       orderBy: { createdAt: "asc" },
+    }),
+    db.sale.findMany({
+      where: saleWhere,
+      include: {
+        branch: { select: { id: true, name: true, code: true } },
+        cashier: { select: { id: true, fullName: true, staffNumber: true } },
+        payments: {
+          where: { tenantId: session.tenantId, status: "COMPLETED" },
+          select: { method: true, amount: true },
+        },
+        _count: { select: { items: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 8,
     }),
     db.shift.count({
       where: {
@@ -109,86 +97,46 @@ export default async function Dashboard() {
     db.invoice.findMany({
       where: {
         tenantId: session.tenantId,
-        branchId: { in: branchIds },
         balance: { gt: 0 },
         status: { notIn: ["CANCELLED", "VOIDED", "REFUNDED"] },
       },
       select: { balance: true },
     }),
-    db.sale.findMany({
-      where: {
-        tenantId: session.tenantId,
-        branchId: { in: branchIds },
-        status: "COMPLETED",
-      },
-      include: {
-        branch: { select: { id: true, name: true, code: true } },
-        cashier: { select: { id: true, fullName: true, staffNumber: true, tenantId: true } },
-        payments: {
-          where: { tenantId: session.tenantId, status: "COMPLETED" },
-          select: { method: true, amount: true },
-        },
-        _count: { select: { items: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-    }),
   ]);
 
-  const salesToday = sales.reduce((sum, sale) => sum + Number(sale.total), 0);
-  const grossProfit = sales.reduce(
-    (saleSum, sale) =>
-      saleSum +
-      sale.items.reduce(
-        (itemSum, item) =>
-          itemSum +
-          Number(item.total) -
-          Number(item.tax) -
-          Number(item.unitCost) * Number(item.quantity),
-        0,
-      ),
+  const currency = user.tenant.currency || "KES";
+  const salesTotal = todaySales.reduce((sum, sale) => sum + Number(sale.total), 0);
+  const grossProfit = todaySales.reduce(
+    (saleSum, sale) => saleSum + sale.items.reduce(
+      (itemSum, item) => itemSum + Number(item.total) - Number(item.tax) - Number(item.unitCost) * Number(item.quantity),
+      0,
+    ),
     0,
   );
+  const lowStock = inventoryRows.filter((row) => row.quantity.lte(row.reorderLevel));
+  const receivables = invoices.reduce((sum, invoice) => sum + Number(invoice.balance), 0);
+  const roleLabel = scope.roleNames.join(", ") || "Tenant user";
+  const firstName = user.fullName.trim().split(/\s+/)[0] || user.fullName;
 
-  const lowStockRows = inventoryRows.filter((row) => row.quantity.lte(row.reorderLevel));
-  const outstandingBalance = outstandingInvoices.reduce(
-    (sum, invoice) => sum + Number(invoice.balance),
-    0,
-  );
-
-  const salesByTwoHours = Array.from({ length: 12 }, () => 0);
+  const hourly = Array.from({ length: 12 }, () => 0);
   const hourFormatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: NAIROBI_TIMEZONE,
+    timeZone: user.tenant.timezone,
     hour: "2-digit",
     hourCycle: "h23",
   });
-
-  for (const sale of sales) {
+  for (const sale of todaySales) {
     const hour = Number(hourFormatter.format(sale.createdAt));
-    const bucket = Math.min(11, Math.floor(hour / 2));
-    salesByTwoHours[bucket] += Number(sale.total);
+    hourly[Math.min(11, Math.floor(hour / 2))] += Number(sale.total);
   }
-
-  const maximumBucket = Math.max(...salesByTwoHours, 0);
-  const firstName = user.fullName.trim().split(/\s+/)[0] || user.fullName;
-  const roleLabel = scope.roleNames.join(", ") || "Team member";
-  const currency = user.tenant.currency || "KES";
+  const maxHour = Math.max(...hourly, 0);
 
   const metrics = [
-    [
-      "Sales today",
-      formatMoney(salesToday, currency),
-      sales.length ? `${sales.length} completed sale${sales.length === 1 ? "" : "s"}` : "No sales recorded",
-    ],
-    ["Gross profit", formatMoney(grossProfit, currency), sales.length ? "From completed sales" : "No sales recorded"],
-    ["Transactions", String(sales.length), "Today"],
+    ["Sales today", money(salesTotal, currency), `${todaySales.length} completed sale${todaySales.length === 1 ? "" : "s"}`],
+    ["Gross profit", money(grossProfit, currency), "From completed sales"],
+    ["Transactions", String(todaySales.length), "Today"],
     ["Active shifts", String(activeShifts), activeShifts ? "Currently open" : "No open shifts"],
-    ["Low stock", String(lowStockRows.length), lowStockRows.length ? "Needs attention" : "No alerts"],
-    [
-      "Receivables",
-      formatMoney(outstandingBalance, currency),
-      `${outstandingInvoices.length} outstanding invoice${outstandingInvoices.length === 1 ? "" : "s"}`,
-    ],
+    ["Low stock", String(lowStock.length), lowStock.length ? "Needs attention" : "No alerts"],
+    ["Receivables", money(receivables, currency), `${invoices.length} outstanding invoice${invoices.length === 1 ? "" : "s"}`],
   ];
 
   return (
@@ -200,19 +148,15 @@ export default async function Dashboard() {
       <div className="dashboard-live-row">
         <div className="filters">
           <button className="chip active" type="button">Today</button>
-          <button className="chip" type="button" disabled>This week</button>
-          <button className="chip" type="button" disabled>This month</button>
           <button className="chip" type="button" disabled>{scope.isTenantAdmin ? "All tenant branches" : "Assigned branches"}</button>
         </div>
         <LiveDataRefresh />
       </div>
 
       <div className="metrics">
-        {metrics.map(([name, value, detail]) => (
-          <article className="metric" key={name}>
-            <small>{name}</small>
-            <strong>{value}</strong>
-            <span>{detail}</span>
+        {metrics.map(([label, value, note]) => (
+          <article className="metric" key={label}>
+            <small>{label}</small><strong>{value}</strong><span>{note}</span>
           </article>
         ))}
       </div>
@@ -220,31 +164,21 @@ export default async function Dashboard() {
       <div className="grid">
         <article className="panel chart">
           <div className="panel-head">
-            <div>
-              <small>PERFORMANCE</small>
-              <h3>Sales by hour</h3>
-            </div>
+            <div><small>PERFORMANCE</small><h3>Sales by hour</h3></div>
             <a className="notification-link" href="/app/sales">View sales</a>
           </div>
-
-          {sales.length === 0 ? (
+          {todaySales.length === 0 ? (
             <div className="empty-state">
-              <span>0</span>
-              <h3>No sales recorded today</h3>
-              <p>Completed staff POS sales for this account will appear here automatically.</p>
+              <span>0</span><h3>No sales recorded today</h3>
+              <p>Completed staff POS sales for this account will appear automatically.</p>
             </div>
           ) : (
             <div className="bars" aria-label="Sales grouped into two-hour intervals">
-              {salesByTwoHours.map((amount, index) => (
+              {hourly.map((amount, index) => (
                 <i
                   key={index}
-                  title={`${String(index * 2).padStart(2, "0")}:00–${String(index * 2 + 1).padStart(2, "0")}:59: ${formatMoney(amount, currency)}`}
-                  style={{
-                    height:
-                      maximumBucket > 0 && amount > 0
-                        ? `${Math.max(4, Math.round((amount / maximumBucket) * 100))}%`
-                        : "0%",
-                  }}
+                  title={`${String(index * 2).padStart(2, "0")}:00 · ${money(amount, currency)}`}
+                  style={{ height: maxHour > 0 && amount > 0 ? `${Math.max(4, Math.round(amount / maxHour * 100))}%` : "0%" }}
                 />
               ))}
             </div>
@@ -253,50 +187,32 @@ export default async function Dashboard() {
 
         <article className="panel">
           <div className="panel-head">
-            <div>
-              <small>ATTENTION</small>
-              <h3>Inventory alerts</h3>
-            </div>
-            <span className="badge">{lowStockRows.length} items</span>
+            <div><small>ATTENTION</small><h3>Inventory alerts</h3></div>
+            <span className="badge">{lowStock.length} items</span>
           </div>
-
-          {lowStockRows.length === 0 ? (
-            <div className="empty-state">
-              <span>✓</span>
-              <h3>No low-stock alerts</h3>
-              <p>Products will appear here when their stock reaches the configured reorder level.</p>
+          {lowStock.length === 0 ? (
+            <div className="empty-state"><span>✓</span><h3>No low-stock alerts</h3><p>Stock alerts will appear here.</p></div>
+          ) : lowStock.slice(0, 4).map((row) => (
+            <div className="list-row" key={row.id}>
+              <span className="product-icon">{row.product.name.slice(0, 1).toUpperCase()}</span>
+              <div><strong>{row.product.name}</strong><small>{row.branch.name} · {Number(row.quantity).toLocaleString("en-KE")} remaining</small></div>
+              <a className="notification-link" href="/app/inventory">View</a>
             </div>
-          ) : (
-            lowStockRows.slice(0, 4).map((row) => (
-              <div className="list-row" key={row.id}>
-                <span className="product-icon">{row.product.name.slice(0, 1).toUpperCase()}</span>
-                <div>
-                  <strong>{row.product.name}</strong>
-                  <small>{row.branch.name} · {formatQuantity(Number(row.quantity))} remaining</small>
-                </div>
-                <a className="notification-link" href="/app/inventory">View</a>
-              </div>
-            ))
-          )}
+          ))}
         </article>
       </div>
 
       <article className="panel dashboard-sales-panel">
         <div className="panel-head">
           <div>
-            <small>LIVE SALES REGISTER</small>
-            <h3>Latest completed sales</h3>
-            <p>Sales are isolated to {user.tenant.name} and the branches this account is allowed to view.</p>
+            <small>LIVE SALES REGISTER</small><h3>Latest completed sales</h3>
+            <p>Only sales belonging to {user.tenant.name} are included.</p>
           </div>
           <a className="notification-link" href="/app/sales">Open full sales register</a>
         </div>
 
         {recentSales.length === 0 ? (
-          <div className="empty-state">
-            <span>0</span>
-            <h3>No completed sales yet</h3>
-            <p>When a staff member completes checkout, the sale will appear here within 15 seconds.</p>
-          </div>
+          <div className="empty-state"><span>0</span><h3>No completed sales yet</h3><p>A completed staff checkout will appear here within 15 seconds.</p></div>
         ) : (
           <div className="dashboard-sales-table-wrap">
             <div className="dashboard-sales-row dashboard-sales-head">
@@ -308,7 +224,7 @@ export default async function Dashboard() {
                 <div><strong>{sale.branch.name}</strong><small>{sale.branch.code}</small></div>
                 <div><strong>{sale.cashier.fullName}</strong><small>@{sale.cashier.staffNumber}</small></div>
                 <div><strong>{sale.payments.map((payment) => payment.method).join(", ") || "Unspecified"}</strong><small>{sale.payments.length} payment{sale.payments.length === 1 ? "" : "s"}</small></div>
-                <strong>{formatMoney(Number(sale.total), currency)}</strong>
+                <strong>{money(Number(sale.total), currency)}</strong>
                 <time dateTime={sale.createdAt.toISOString()}>{sale.createdAt.toLocaleString("en-KE", { timeZone: user.tenant.timezone, dateStyle: "short", timeStyle: "short" })}</time>
               </div>
             ))}
