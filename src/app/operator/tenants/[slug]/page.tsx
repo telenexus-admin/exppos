@@ -24,7 +24,7 @@ export default async function Page({
         where: {
           roles: {
             some: {
-              role: { code: "TENANT_ADMIN" },
+              role: { tenantId: undefined, code: "TENANT_ADMIN" },
             },
           },
         },
@@ -99,8 +99,13 @@ export default async function Page({
               <small>ADMIN LOGIN</small>
               <h2>First administrator credentials</h2>
             </div>
-            <a className="manage-link" href="/login" target="_blank" rel="noreferrer">
-              Open login page →
+            <a
+              className="manage-link"
+              href={`/api/v1/operator/tenants/${tenant.id}/open-login`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open isolated client login →
             </a>
           </div>
 
@@ -121,7 +126,7 @@ export default async function Page({
                 <span>Second field: {admin.email}, {admin.staffNumber}, {admin.phone ?? "administrator phone"}, or {tenant.email}</span>
                 <span>Third field: the temporary password entered during onboarding.</span>
                 <small>
-                  The original temporary password is never stored in readable form. Use “Reset admin password” when it has been lost or rejected.
+                  “Open isolated client login” clears any previous tenant session first, preventing one client&apos;s staff or sales from appearing in another client&apos;s dashboard.
                 </small>
               </div>
             </>
