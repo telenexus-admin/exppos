@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
         OR: [
           { email: normalizedIdentifier },
           { phone: body.identifier.trim() },
-          { staffNumber: normalizedIdentifier },
+          { staffNumber: { equals: body.identifier.trim(), mode: "insensitive" } },
         ],
         status: "ACTIVE",
       },
