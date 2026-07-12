@@ -118,6 +118,7 @@ export async function POST(req: NextRequest) {
     });
 
     const secure = process.env.APP_URL?.startsWith("https://") ?? false;
+    response.headers.set("Cache-Control", "no-store");
     response.cookies.set("tenant_session", accessToken, {
       httpOnly: true,
       secure,
@@ -129,8 +130,15 @@ export async function POST(req: NextRequest) {
       httpOnly: true,
       secure,
       sameSite: "strict",
-      path: "/api/v1/auth",
+      path: "/",
       maxAge: 30 * 86400,
+    });
+    response.cookies.set("tenant_refresh", "", {
+      httpOnly: true,
+      secure,
+      sameSite: "strict",
+      path: "/api/v1/auth",
+      expires: new Date(0),
     });
 
     return response;

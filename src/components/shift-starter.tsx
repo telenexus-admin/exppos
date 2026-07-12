@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { authenticatedFetch } from "@/lib/authenticated-fetch";
 
 type BranchOption = { id: string; name: string };
 
@@ -17,7 +18,7 @@ export function ShiftStarter({ branches, currency }: { branches: BranchOption[];
     setLoading(true);
 
     const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/v1/staff/shifts", {
+    const response = await authenticatedFetch("/api/v1/staff/shifts", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ branchId: form.get("branchId"), openingCash: form.get("openingCash") }),

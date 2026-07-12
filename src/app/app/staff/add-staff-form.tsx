@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { authenticatedFetch } from "@/lib/authenticated-fetch";
 
 type BranchOption = { id: string; name: string; code: string };
 
@@ -54,7 +55,7 @@ export function AddStaffForm({
     const data = new FormData(form);
 
     try {
-      const response = await fetch("/api/v1/app/staff", {
+      const response = await authenticatedFetch("/api/v1/app/staff", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
