@@ -5,6 +5,8 @@ import { requireCurrentTenant } from "@/server/auth/current-tenant";
 
 export const dynamic = "force-dynamic";
 
+type PaymentBucket = "cash" | "mobile" | "card" | "bank" | "other";
+
 function formatMoney(value: number, currency: string) {
   try {
     return new Intl.NumberFormat("en-KE", {
@@ -18,7 +20,7 @@ function formatMoney(value: number, currency: string) {
   }
 }
 
-function paymentBucket(method: string) {
+function paymentBucket(method: string): PaymentBucket {
   const normalized = method.trim().toLowerCase();
   if (normalized.includes("cash")) return "cash";
   if (normalized.includes("mpesa") || normalized.includes("m-pesa") || normalized.includes("mobile")) return "mobile";
@@ -64,7 +66,7 @@ export default async function StaffDashboard() {
   const currency = user.tenant.currency || "KES";
   const sales = openShift?.sales ?? [];
   const totalSales = sales.reduce((sum, sale) => sum + Number(sale.total), 0);
-  const paymentTotals = { cash: 0, mobile: 0, card: 0, bank: 0, other: 0 };
+  const paymentTotals: Record<PaymentBucket, number> = { cash: 0, mobile: 0, card: 0, bank: 0, other: 0 };
 
   for (const sale of sales) {
     for (const payment of sale.payments) {
