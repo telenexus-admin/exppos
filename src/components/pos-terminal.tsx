@@ -24,6 +24,9 @@ export type PosBehavior = {
   taxEnabled: boolean;
   pricesIncludeTax: boolean;
   showTaxBreakdown: boolean;
+  mpesaType: "Till" | "Paybill";
+  mpesaNumber: string;
+  mpesaAccountInstructions: string;
 };
 
 type CartLine = { productId: string; quantity: number };
@@ -242,7 +245,14 @@ export function PosTerminal({
         })}
         <div className="totals"><p><span>Subtotal</span><b>{money(subtotal, currency)}</b></p>{behavior.showTaxBreakdown && <p><span>Tax</span><b>{money(tax, currency)}</b></p>}<p className="grand"><span>Total</span><b>{money(total, currency)}</b></p></div>
         <div className="payment-fields">
-          <label>Payment method<select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>{paymentMethods.map((method) => <option key={method}>{method}</option>)}</select></label>
+          <label>Payment method<select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value as PaymentMethod); setPaymentReference(""); }}>{paymentMethods.map((method) => <option key={method}>{method}</option>)}</select></label>
+          {paymentMethod === "Mobile Money" && behavior.mpesaNumber && (
+            <div className="pos-payment-instructions">
+              <small>M-PESA {behavior.mpesaType.toUpperCase()}</small>
+              <strong>{behavior.mpesaNumber}</strong>
+              {behavior.mpesaAccountInstructions && <span>{behavior.mpesaAccountInstructions}</span>}
+            </div>
+          )}
           {paymentMethod !== "Cash" && <label>Payment reference<input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} required={behavior.requireReferenceForNonCash} placeholder="Receipt / transaction reference" /></label>}
         </div>
         <div className="pay-actions"><button type="button" onClick={() => setCart([])} disabled={lines.length === 0}>Cancel</button><button className="primary" type="button" onClick={completeSale} disabled={loading || lines.length === 0 || !shiftId || !canSell}>{loading ? "Processing…" : `Pay ${money(total, currency)}`}</button></div>
