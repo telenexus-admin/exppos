@@ -4,6 +4,7 @@ import { PortalShell } from "@/components/portal-shell";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,7 +41,7 @@ export default async function Dashboard() {
 
   const user = await db.user.findFirst({
     where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" },
-    include: { tenant: true },
+    include: { tenant: { include: { settings: true } } },
   });
   if (!user) redirect("/login");
 
@@ -104,6 +105,7 @@ export default async function Dashboard() {
     }),
   ]);
 
+  const tenantSettings = normalizeTenantSettings(user.tenant.settings?.metadata);
   const currency = user.tenant.currency || "KES";
   const salesTotal = todaySales.reduce((sum, sale) => sum + Number(sale.total), 0);
   const grossProfit = todaySales.reduce(
@@ -113,7 +115,9 @@ export default async function Dashboard() {
     ),
     0,
   );
-  const lowStock = inventoryRows.filter((row) => row.quantity.lte(row.reorderLevel));
+  const lowStock = tenantSettings.inventory.lowStockAlerts
+    ? inventoryRows.filter((row) => row.quantity.lte(row.reorderLevel))
+    : [];
   const receivables = invoices.reduce((sum, invoice) => sum + Number(invoice.balance), 0);
   const roleLabel = scope.roleNames.join(", ") || "Tenant user";
   const firstName = user.fullName.trim().split(/\s+/)[0] || user.fullName;
@@ -135,7 +139,13 @@ export default async function Dashboard() {
     ["Gross profit", money(grossProfit, currency), "From completed sales"],
     ["Transactions", String(todaySales.length), "Today"],
     ["Active shifts", String(activeShifts), activeShifts ? "Currently open" : "No open shifts"],
-    ["Low stock", String(lowStock.length), lowStock.length ? "Needs attention" : "No alerts"],
+    [
+      "Low stock",
+      String(lowStock.length),
+      tenantSettings.inventory.lowStockAlerts
+        ? lowStock.length ? "Needs attention" : "No alerts"
+        : "Alerts disabled in Settings",
+    ],
     ["Receivables", money(receivables, currency), `${invoices.length} outstanding invoice${invoices.length === 1 ? "" : "s"}`],
   ];
 
@@ -190,7 +200,9 @@ export default async function Dashboard() {
             <div><small>ATTENTION</small><h3>Inventory alerts</h3></div>
             <span className="badge">{lowStock.length} items</span>
           </div>
-          {lowStock.length === 0 ? (
+          {!tenantSettings.inventory.lowStockAlerts ? (
+            <div className="empty-state"><span>—</span><h3>Low-stock alerts disabled</h3><p>Enable them from Settings → Inventory rules.</p></div>
+          ) : lowStock.length === 0 ? (
             <div className="empty-state"><span>✓</span><h3>No low-stock alerts</h3><p>Stock alerts will appear here.</p></div>
           ) : lowStock.slice(0, 4).map((row) => (
             <div className="list-row" key={row.id}>

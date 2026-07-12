@@ -29,12 +29,16 @@ export function ProductManager({
   canCreate,
   currentProducts,
   maxProducts,
+  defaultTaxPercent,
+  defaultReorderLevel,
 }: {
   branches: Option[];
   categories: Option[];
   canCreate: boolean;
   currentProducts: number;
   maxProducts: number;
+  defaultTaxPercent: number;
+  defaultReorderLevel: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -149,10 +153,10 @@ export function ProductManager({
               <label>Opening branch<select name="branchId" required defaultValue={branches[0]?.id ?? ""}><option value="" disabled>Select branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.code ? ` (${branch.code})` : ""}</option>)}</select></label>
               <label>Cost price<input name="costPrice" type="number" min="0" step="0.01" defaultValue="0" required /></label>
               <label>Selling price<input name="sellingPrice" type="number" min="0" step="0.01" required placeholder="0.00" /></label>
-              <label>Tax rate (%)<input name="taxPercent" type="number" min="0" max="100" step="0.01" defaultValue="0" required /></label>
+              <label>Tax rate (%)<input name="taxPercent" type="number" min="0" max="100" step="0.01" defaultValue={defaultTaxPercent} required /></label>
               <label className="catalog-checkbox-label"><input type="checkbox" checked={trackStock} onChange={(event) => setTrackStock(event.target.checked)} /><span><strong>Track stock</strong><small>Turn this off for services or unlimited items.</small></span></label>
               <label>Opening quantity<input name="initialStock" type="number" min="0" step="0.001" defaultValue="0" required disabled={!trackStock} /></label>
-              <label>Reorder level<input name="reorderLevel" type="number" min="0" step="0.001" defaultValue="0" required disabled={!trackStock} /></label>
+              <label>Reorder level<input name="reorderLevel" type="number" min="0" step="0.001" defaultValue={defaultReorderLevel} required disabled={!trackStock} /></label>
             </div>
 
             {error && <p className="catalog-form-error" role="alert">{error}</p>}

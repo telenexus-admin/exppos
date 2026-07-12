@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import { appendAudit } from "@/server/audit/audit";
 import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { requirePermission, type TenantContext } from "@/server/security/context";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 import { nextNumber } from "./sequences";
 
 type SaleInput = {
@@ -33,21 +34,39 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
   if (!scope.branchIds.includes(input.branchId)) {
     throw new AppError("BRANCH_FORBIDDEN", "This account is not assigned to the selected branch", 403);
   }
-
   if (!input.items.length || !input.payments.length) {
     throw new AppError("INVALID_SALE", "Items and payment are required", 422);
   }
 
   return db.$transaction(async (tx) => {
     const duplicate = await tx.sale.findUnique({
-      where: {
-        tenantId_idempotencyKey: {
-          tenantId: ctx.tenantId,
-          idempotencyKey: input.idempotencyKey,
-        },
-      },
+      where: { tenantId_idempotencyKey: { tenantId: ctx.tenantId, idempotencyKey: input.idempotencyKey } },
     });
     if (duplicate) return duplicate;
+
+    const tenantSetting = await tx.tenantSetting.findUnique({ where: { tenantId: ctx.tenantId } });
+    const settings = normalizeTenantSettings(tenantSetting?.metadata);
+    const enabledPayments = new Set(settings.payments.enabledMethods);
+
+    if (!settings.payments.allowSplitPayments && input.payments.length > 1) {
+      throw new AppError("SPLIT_PAYMENT_DISABLED", "Split payments are disabled in this business settings", 409);
+    }
+    for (const payment of input.payments) {
+      if (!enabledPayments.has(payment.method as never)) {
+        throw new AppError("PAYMENT_METHOD_DISABLED", `${payment.method} is disabled in this business settings`, 409);
+      }
+      if (payment.method === "Credit" && !settings.pos.allowCreditSales) {
+        throw new AppError("CREDIT_SALES_DISABLED", "Credit sales are disabled in this business settings", 409);
+      }
+      if (payment.method !== "Cash" && settings.payments.requireReferenceForNonCash && !payment.externalReference?.trim()) {
+        throw new AppError("PAYMENT_REFERENCE_REQUIRED", `Enter the ${payment.method} transaction reference`, 422);
+      }
+    }
+
+    const usesCredit = input.payments.some((payment) => payment.method === "Credit");
+    if (usesCredit && settings.pos.requireCustomerForCredit && !input.customerId) {
+      throw new AppError("CREDIT_CUSTOMER_REQUIRED", "Select a customer before completing a credit sale", 422);
+    }
 
     const shift = await tx.shift.findFirst({
       where: {
@@ -62,9 +81,7 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
 
     if (
       input.customerId &&
-      !(await tx.customer.findFirst({
-        where: { id: input.customerId, tenantId: ctx.tenantId, deletedAt: null },
-      }))
+      !(await tx.customer.findFirst({ where: { id: input.customerId, tenantId: ctx.tenantId, deletedAt: null } }))
     ) {
       throw new AppError("CUSTOMER_NOT_FOUND", "Customer not found", 404);
     }
@@ -85,27 +102,79 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
 
       const unitPrice = item.unitPrice ? new Prisma.Decimal(item.unitPrice) : product.sellingPrice;
       const itemDiscount = new Prisma.Decimal(item.discount ?? 0);
-      const net = unitPrice.mul(quantity).minus(itemDiscount);
-      const itemTax = net.mul(product.taxRate);
-
-      if (unitPrice.lt(product.sellingPrice)) requirePermission(ctx, "sale.override_price");
-
-      if (product.trackStock) {
-        const updated = await tx.branchInventory.updateMany({
-          where: {
-            tenantId: ctx.tenantId,
-            branchId: input.branchId,
-            productId: product.id,
-            quantity: { gte: quantity },
-          },
-          data: { quantity: { decrement: quantity } },
-        });
-        if (updated.count !== 1) {
-          throw new AppError("INSUFFICIENT_STOCK", `Insufficient stock for ${product.name}`, 409);
+      const gross = unitPrice.mul(quantity);
+      if (itemDiscount.lt(0) || itemDiscount.gt(gross)) {
+        throw new AppError("INVALID_DISCOUNT", `The discount for ${product.name} is invalid`, 422);
+      }
+      if (itemDiscount.gt(0)) {
+        if (!settings.pos.allowDiscounts) {
+          throw new AppError("DISCOUNTS_DISABLED", "Discounts are disabled in this business settings", 409);
+        }
+        const percentage = gross.isZero() ? new Prisma.Decimal(0) : itemDiscount.div(gross).mul(100);
+        if (percentage.gt(settings.pos.maximumDiscountPercent)) {
+          throw new AppError(
+            "DISCOUNT_LIMIT_EXCEEDED",
+            `Discount for ${product.name} exceeds the ${settings.pos.maximumDiscountPercent}% business limit`,
+            409,
+          );
         }
       }
 
-      subtotal = subtotal.plus(unitPrice.mul(quantity));
+      if (unitPrice.lt(product.sellingPrice)) {
+        if (!settings.pos.allowPriceOverrides) {
+          throw new AppError("PRICE_OVERRIDE_DISABLED", "Price overrides are disabled in this business settings", 409);
+        }
+        requirePermission(ctx, "sale.override_price");
+      }
+
+      const net = gross.minus(itemDiscount);
+      let itemTax = new Prisma.Decimal(0);
+      let itemTotal = net;
+      if (settings.taxReceipt.taxEnabled && product.taxRate.gt(0)) {
+        if (settings.taxReceipt.pricesIncludeTax) {
+          itemTax = net.minus(net.div(product.taxRate.plus(1)));
+        } else {
+          itemTax = net.mul(product.taxRate);
+          itemTotal = net.plus(itemTax);
+        }
+      }
+
+      if (product.trackStock) {
+        if (settings.inventory.allowNegativeStock) {
+          await tx.branchInventory.upsert({
+            where: {
+              tenantId_branchId_productId: {
+                tenantId: ctx.tenantId,
+                branchId: input.branchId,
+                productId: product.id,
+              },
+            },
+            update: { quantity: { decrement: quantity } },
+            create: {
+              tenantId: ctx.tenantId,
+              branchId: input.branchId,
+              productId: product.id,
+              quantity: quantity.negated(),
+              reorderLevel: new Prisma.Decimal(settings.inventory.defaultReorderLevel),
+            },
+          });
+        } else {
+          const updated = await tx.branchInventory.updateMany({
+            where: {
+              tenantId: ctx.tenantId,
+              branchId: input.branchId,
+              productId: product.id,
+              quantity: { gte: quantity },
+            },
+            data: { quantity: { decrement: quantity } },
+          });
+          if (updated.count !== 1) {
+            throw new AppError("INSUFFICIENT_STOCK", `Insufficient stock for ${product.name}`, 409);
+          }
+        }
+      }
+
+      subtotal = subtotal.plus(gross);
       discount = discount.plus(itemDiscount);
       tax = tax.plus(itemTax);
       items.push({
@@ -115,12 +184,13 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
         unitCost: product.costPrice,
         discount: itemDiscount,
         tax: itemTax,
-        total: net.plus(itemTax),
+        total: itemTotal,
         trackStock: product.trackStock,
       });
     }
 
-    const total = subtotal.minus(discount).plus(tax);
+    const netSales = subtotal.minus(discount);
+    const total = settings.taxReceipt.pricesIncludeTax ? netSales : netSales.plus(tax);
     const paid = input.payments.reduce(
       (sum, payment) => sum.plus(payment.amount),
       new Prisma.Decimal(0),
@@ -142,15 +212,13 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
         tax,
         total,
         paid,
-        items: {
-          create: items.map(({ trackStock: _trackStock, ...item }) => item),
-        },
+        items: { create: items.map(({ trackStock: _trackStock, ...item }) => item) },
         payments: {
           create: input.payments.map((payment) => ({
             tenantId: ctx.tenantId,
             method: payment.method,
             amount: new Prisma.Decimal(payment.amount),
-            externalReference: payment.externalReference,
+            externalReference: payment.externalReference?.trim() || null,
             receivedBy: ctx.userId,
           })),
         },
@@ -174,26 +242,20 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
     }
 
     const revenue = total.minus(tax);
-    const cost = items.reduce(
-      (sum, item) => sum.plus(item.unitCost.mul(item.quantity)),
-      new Prisma.Decimal(0),
-    );
-
+    const cost = items.reduce((sum, item) => sum.plus(item.unitCost.mul(item.quantity)), new Prisma.Decimal(0));
     await tx.journalEntry.create({
       data: {
         tenantId: ctx.tenantId,
         referenceType: "sale",
         referenceId: sale.id,
         description: sale.saleNumber,
-        lines: {
-          create: [
-            { accountCode: "1000", debit: total, credit: 0 },
-            { accountCode: "4000", debit: 0, credit: revenue },
-            { accountCode: "2100", debit: 0, credit: tax },
-            { accountCode: "5000", debit: cost, credit: 0 },
-            { accountCode: "1200", debit: 0, credit: cost },
-          ],
-        },
+        lines: { create: [
+          { accountCode: "1000", debit: total, credit: 0 },
+          { accountCode: "4000", debit: 0, credit: revenue },
+          { accountCode: "2100", debit: 0, credit: tax },
+          { accountCode: "5000", debit: cost, credit: 0 },
+          { accountCode: "1200", debit: 0, credit: cost },
+        ] },
       },
     });
 

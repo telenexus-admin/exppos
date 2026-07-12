@@ -3,6 +3,7 @@ import { PortalShell } from "@/components/portal-shell";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { requirePermission } from "@/server/security/context";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 import { InventoryManager } from "./inventory-manager";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export default async function InventoryPage() {
       where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" },
       include: { roles: { include: { role: true } } },
     }),
-    db.tenant.findUnique({ where: { id: session.tenantId } }),
+    db.tenant.findUnique({ where: { id: session.tenantId }, include: { settings: true } }),
     db.branch.findMany({
       where: { tenantId: session.tenantId, status: "ACTIVE" },
       select: { id: true, name: true, code: true },
@@ -46,7 +47,10 @@ export default async function InventoryPage() {
   const roleLabel = viewer.roles.map(({ role }) => role.name).join(", ") || "Tenant user";
   const trackedRows = inventory.filter((row) => row.product.trackStock);
   const totalUnits = trackedRows.reduce((sum, row) => sum + Number(row.quantity), 0);
-  const lowStockRows = trackedRows.filter((row) => Number(row.quantity) <= Number(row.reorderLevel));
+  const settings = normalizeTenantSettings(tenant.settings?.metadata);
+  const lowStockRows = settings.inventory.lowStockAlerts
+    ? trackedRows.filter((row) => Number(row.quantity) <= Number(row.reorderLevel))
+    : [];
   const outOfStockRows = trackedRows.filter((row) => Number(row.quantity) <= 0);
   const canEditProducts = session.permissions.has("product.update");
 
@@ -62,13 +66,14 @@ export default async function InventoryPage() {
           products={products}
           branches={branches}
           canAdjust={session.permissions.has("inventory.adjust")}
+          reasonRequired={settings.inventory.requireAdjustmentReason}
         />
       </section>
 
       <section className="catalog-summary-grid">
         <article><small>Stock products</small><strong>{products.filter((product) => product.trackStock).length}</strong><span>Selectable for adjustments</span></article>
         <article><small>Total units</small><strong>{totalUnits.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><span>Across active branches</span></article>
-        <article><small>Low stock</small><strong>{lowStockRows.length}</strong><span>At or below reorder level</span></article>
+        <article><small>Low stock</small><strong>{lowStockRows.length}</strong><span>{settings.inventory.lowStockAlerts ? "At or below reorder level" : "Alerts disabled in Settings"}</span></article>
         <article><small>Out of stock</small><strong>{outOfStockRows.length}</strong><span>Requires restocking</span></article>
       </section>
 
@@ -79,39 +84,20 @@ export default async function InventoryPage() {
         </div>
 
         {inventory.length === 0 ? (
-          <div className="catalog-empty-state">
-            <span>0</span>
-            <h3>No stock allocations yet</h3>
-            <p>Create a product with opening stock, or use Adjust stock to allocate an existing product to a branch.</p>
-          </div>
+          <div className="catalog-empty-state"><span>0</span><h3>No stock allocations yet</h3><p>Create a product with opening stock, or use Adjust stock to allocate an existing product to a branch.</p></div>
         ) : (
           <div className="catalog-table-wrap">
-            <div className="inventory-table inventory-table-head">
-              <span>Product</span><span>Branch</span><span>Available</span><span>Reorder level</span><span>Stock status</span>
-            </div>
+            <div className="inventory-table inventory-table-head"><span>Product</span><span>Branch</span><span>Available</span><span>Reorder level</span><span>Stock status</span></div>
             {inventory.map((row) => {
               const quantity = Number(row.quantity);
               const reorderLevel = Number(row.reorderLevel);
               const isService = !row.product.trackStock;
               const out = !isService && quantity <= 0;
-              const low = !isService && !out && quantity <= reorderLevel;
+              const low = settings.inventory.lowStockAlerts && !isService && !out && quantity <= reorderLevel;
               const status = isService ? "Unlimited" : out ? "Out of stock" : low ? "Low stock" : "In stock";
               const statusClass = isService ? "service" : out ? "danger" : low ? "warning" : "active";
-              const rowContent = (
-                <>
-                  <div className="catalog-product-cell"><span>{row.product.name.slice(0, 1).toUpperCase()}</span><div><strong>{row.product.name}</strong><small>{row.product.sku} · {row.product.category?.name ?? "Uncategorized"}{canEditProducts ? " · Click to edit product" : ""}</small></div></div>
-                  <div><strong>{row.branch.name}</strong><small>{row.branch.code}</small></div>
-                  <div><strong>{isService ? "Unlimited" : quantity.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><small>{isService ? "Stock tracking disabled" : "Current balance"}</small></div>
-                  <div><strong>{isService ? "—" : reorderLevel.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><small>Restock threshold</small></div>
-                  <span className={`catalog-status ${statusClass}`}>{status}</span>
-                </>
-              );
-
-              return canEditProducts ? (
-                <a className="inventory-table catalog-row-link" href={`/app/products/${row.product.id}/edit`} key={row.id}>{rowContent}</a>
-              ) : (
-                <div className="inventory-table" key={row.id}>{rowContent}</div>
-              );
+              const rowContent = <><div className="catalog-product-cell"><span>{row.product.name.slice(0, 1).toUpperCase()}</span><div><strong>{row.product.name}</strong><small>{row.product.sku} · {row.product.category?.name ?? "Uncategorized"}{canEditProducts ? " · Click to edit product" : ""}</small></div></div><div><strong>{row.branch.name}</strong><small>{row.branch.code}</small></div><div><strong>{isService ? "Unlimited" : quantity.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><small>{isService ? "Stock tracking disabled" : "Current balance"}</small></div><div><strong>{isService ? "—" : reorderLevel.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><small>Restock threshold</small></div><span className={`catalog-status ${statusClass}`}>{status}</span></>;
+              return canEditProducts ? <a className="inventory-table catalog-row-link" href={`/app/products/${row.product.id}/edit`} key={row.id}>{rowContent}</a> : <div className="inventory-table" key={row.id}>{rowContent}</div>;
             })}
           </div>
         )}

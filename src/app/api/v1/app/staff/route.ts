@@ -7,6 +7,7 @@ import { appendAudit } from "@/server/audit/audit";
 import { apiError, tenantContext } from "@/server/http";
 import { hashSecret } from "@/server/security/passwords";
 import { requirePermission } from "@/server/security/context";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 
 const roleTemplates = {
   CASHIER: {
@@ -141,7 +142,7 @@ export async function POST(req: NextRequest) {
         result = await db.$transaction(async (tx) => {
           const tenant = await tx.tenant.findUnique({
             where: { id: ctx.tenantId },
-            include: { subscription: { include: { plan: true } } },
+            include: { subscription: { include: { plan: true } }, settings: true },
           });
 
           if (!tenant) throw new AppError("NOT_FOUND", "Business account was not found", 404);
@@ -215,6 +216,10 @@ export async function POST(req: NextRequest) {
             });
           }
 
+          const forcePasswordChange = normalizeTenantSettings(
+            tenant.settings?.metadata,
+          ).securityNotifications.forcePasswordChange;
+
           const user = await tx.user.create({
             data: {
               tenantId: ctx.tenantId,
@@ -224,7 +229,7 @@ export async function POST(req: NextRequest) {
               phone: body.phone || null,
               passwordHash,
               status: "ACTIVE",
-              forcePasswordChange: true,
+              forcePasswordChange,
             },
           });
 

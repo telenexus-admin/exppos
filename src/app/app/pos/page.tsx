@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
-import { PosTerminal, type PosProduct } from "@/components/pos-terminal";
+import { PosTerminal, type PosBehavior, type PosProduct } from "@/components/pos-terminal";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { requirePermission } from "@/server/security/context";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,7 +18,7 @@ export default async function PosPage() {
   const user = await db.user.findFirst({
     where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" },
     include: {
-      tenant: true,
+      tenant: { include: { settings: true } },
       roles: {
         where: { role: { tenantId: session.tenantId } },
         include: { role: true },
@@ -49,7 +50,6 @@ export default async function PosPage() {
   ]);
 
   const activeBranch = openShift?.branch ?? accessibleBranches[0] ?? null;
-
   const inventory = activeBranch
     ? await db.branchInventory.findMany({
         where: {
@@ -75,8 +75,22 @@ export default async function PosPage() {
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
 
-  const returnPath = scope.isTenantAdmin ? "/app/dashboard" : "/staff/dashboard";
-  const canSell = session.permissions.has("sale.create") && session.permissions.has("payment.receive");
+  const settings = normalizeTenantSettings(user.tenant.settings?.metadata);
+  const enabledPaymentMethods = settings.payments.enabledMethods.filter(
+    (method) => method !== "Credit" || settings.pos.allowCreditSales,
+  );
+  const behavior: PosBehavior = {
+    enabledPaymentMethods: enabledPaymentMethods.length > 0 ? enabledPaymentMethods : ["Cash"],
+    requireReferenceForNonCash: settings.payments.requireReferenceForNonCash,
+    confirmBeforePayment: settings.pos.confirmBeforePayment,
+    allowNegativeStock: settings.inventory.allowNegativeStock,
+    taxEnabled: settings.taxReceipt.taxEnabled,
+    pricesIncludeTax: settings.taxReceipt.pricesIncludeTax,
+    showTaxBreakdown: settings.taxReceipt.showTaxBreakdown,
+    mpesaType: settings.payments.mpesaType,
+    mpesaNumber: settings.payments.mpesaNumber,
+    mpesaAccountInstructions: settings.payments.mpesaAccountInstructions,
+  };
 
   return (
     <PosTerminal
@@ -86,8 +100,9 @@ export default async function PosPage() {
       shiftId={openShift?.id ?? null}
       cashierName={user.fullName}
       currency={user.tenant.currency || "KES"}
-      canSell={canSell}
-      returnPath={returnPath}
+      canSell={session.permissions.has("sale.create") && session.permissions.has("payment.receive")}
+      returnPath={scope.isTenantAdmin ? "/app/dashboard" : "/staff/dashboard"}
+      behavior={behavior}
     />
   );
 }

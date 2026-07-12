@@ -6,22 +6,18 @@ import { authenticatedFetch } from "@/lib/authenticated-fetch";
 
 type ProductOption = { id: string; name: string; sku: string; trackStock: boolean };
 type BranchOption = { id: string; name: string; code: string };
-
-type AdjustmentSuccess = {
-  productName: string;
-  branchName: string;
-  previousQuantity: string;
-  quantity: string;
-};
+type AdjustmentSuccess = { productName: string; branchName: string; previousQuantity: string; quantity: string };
 
 export function InventoryManager({
   products,
   branches,
   canAdjust,
+  reasonRequired,
 }: {
   products: ProductOption[];
   branches: BranchOption[];
   canAdjust: boolean;
+  reasonRequired: boolean;
 }) {
   const router = useRouter();
   const stockProducts = useMemo(() => products.filter((product) => product.trackStock), [products]);
@@ -42,7 +38,6 @@ export function InventoryManager({
     setLoading(true);
     setError("");
     setSuccess(null);
-
     const form = event.currentTarget;
     const data = new FormData(form);
 
@@ -60,7 +55,6 @@ export function InventoryManager({
         }),
       });
       const body = await response.json().catch(() => ({}));
-
       if (!response.ok) {
         setError(body?.error?.message ?? "Stock could not be updated.");
         return;
@@ -98,24 +92,14 @@ export function InventoryManager({
       {stockProducts.length === 0 && <p className="catalog-inline-warning">No stock products exist yet. Use Add product to create one first.</p>}
       {branches.length === 0 && <p className="catalog-inline-warning">Create an active branch before adjusting inventory.</p>}
 
-      {success && (
-        <div className="catalog-success" role="status">
-          <strong>{success.productName} updated</strong>
-          <span>{success.branchName}: {success.previousQuantity} → {success.quantity}</span>
-          <button type="button" onClick={() => setSuccess(null)} aria-label="Dismiss">×</button>
-        </div>
-      )}
+      {success && <div className="catalog-success" role="status"><strong>{success.productName} updated</strong><span>{success.branchName}: {success.previousQuantity} → {success.quantity}</span><button type="button" onClick={() => setSuccess(null)} aria-label="Dismiss">×</button></div>}
 
       {open && (
         <div className="catalog-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-form-title">
           <button className="catalog-modal-backdrop" type="button" aria-label="Close stock form" onClick={close} />
           <form className="catalog-form-card inventory-form-card" onSubmit={submit}>
             <div className="catalog-form-heading">
-              <div>
-                <small>BRANCH STOCK CONTROL</small>
-                <h3 id="inventory-form-title">Adjust inventory</h3>
-                <p>Select a real product and branch, then set, add, or remove stock.</p>
-              </div>
+              <div><small>BRANCH STOCK CONTROL</small><h3 id="inventory-form-title">Adjust inventory</h3><p>Select a real product and branch, then set, add, or remove stock.</p></div>
               <button className="catalog-close-button" type="button" onClick={close} aria-label="Close">×</button>
             </div>
 
@@ -125,19 +109,12 @@ export function InventoryManager({
               <label>Action<select name="mode" required defaultValue="add"><option value="add">Add stock</option><option value="remove">Remove stock</option><option value="set">Set exact quantity</option></select></label>
               <label>Quantity<input name="quantity" type="number" min="0" step="0.001" required placeholder="0" /></label>
               <label>Reorder level <small>(optional)</small><input name="reorderLevel" type="number" min="0" step="0.001" placeholder="Keep current value" /></label>
-              <label className="catalog-span-2">Reason<textarea name="reason" required minLength={3} maxLength={240} placeholder="e.g. Opening balance, supplier delivery, damaged stock, physical count correction" /></label>
+              <label className="catalog-span-2">Reason {reasonRequired ? <small>(required)</small> : <small>(optional)</small>}<textarea name="reason" required={reasonRequired} minLength={reasonRequired ? 3 : undefined} maxLength={240} placeholder="e.g. Opening balance, supplier delivery, damaged stock, physical count correction" /></label>
             </div>
 
-            <div className="inventory-mode-note">
-              <strong>Set exact quantity</strong> replaces the current balance. <strong>Add</strong> and <strong>Remove</strong> change it by the entered amount. Leave reorder level blank to preserve its current value.
-            </div>
-
+            <div className="inventory-mode-note"><strong>Set exact quantity</strong> replaces the current balance. <strong>Add</strong> and <strong>Remove</strong> change it by the entered amount. Leave reorder level blank to preserve its current value.</div>
             {error && <p className="catalog-form-error" role="alert">{error}</p>}
-
-            <div className="catalog-form-actions">
-              <button type="button" onClick={close}>Cancel</button>
-              <button className="primary" type="submit" disabled={loading}>{loading ? "Updating stock…" : "Update stock"}</button>
-            </div>
+            <div className="catalog-form-actions"><button type="button" onClick={close}>Cancel</button><button className="primary" type="submit" disabled={loading}>{loading ? "Updating stock…" : "Update stock"}</button></div>
           </form>
         </div>
       )}
