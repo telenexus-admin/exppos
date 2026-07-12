@@ -3,6 +3,7 @@ import { PortalShell } from "@/components/portal-shell";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { requirePermission } from "@/server/security/context";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 import { ProductManager } from "./product-manager";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export default async function ProductsPage() {
     }),
     db.tenant.findUnique({
       where: { id: session.tenantId },
-      include: { subscription: { include: { plan: true } } },
+      include: { subscription: { include: { plan: true } }, settings: true },
     }),
     db.category.findMany({
       where: { tenantId: session.tenantId },
@@ -47,7 +48,7 @@ export default async function ProductsPage() {
       where: { tenantId: session.tenantId },
       include: {
         category: true,
-        inventories: { include: { branch: true } },
+        inventories: { where: { tenantId: session.tenantId }, include: { branch: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -65,6 +66,7 @@ export default async function ProductsPage() {
     0,
   );
   const canEdit = session.permissions.has("product.update");
+  const metadata = normalizeTenantSettings(tenant.settings?.metadata);
 
   return (
     <PortalShell title="Products" role={roleLabel} current="products" branchName={tenant.name}>
@@ -80,6 +82,8 @@ export default async function ProductsPage() {
           canCreate={session.permissions.has("product.create")}
           currentProducts={products.length}
           maxProducts={maxProducts}
+          defaultTaxPercent={metadata.taxReceipt.taxEnabled ? Number(tenant.settings?.taxRate ?? 0) * 100 : 0}
+          defaultReorderLevel={metadata.inventory.defaultReorderLevel}
         />
       </section>
 
@@ -97,34 +101,15 @@ export default async function ProductsPage() {
         </div>
 
         {products.length === 0 ? (
-          <div className="catalog-empty-state">
-            <span>＋</span>
-            <h3>No products yet</h3>
-            <p>Use the Add product button to create the first item and opening stock.</p>
-          </div>
+          <div className="catalog-empty-state"><span>＋</span><h3>No products yet</h3><p>Use the Add product button to create the first item and opening stock.</p></div>
         ) : (
           <div className="catalog-table-wrap">
-            <div className="product-table product-table-head">
-              <span>Product</span><span>Category</span><span>Cost / price</span><span>Stock allocation</span><span>Status</span>
-            </div>
+            <div className="product-table product-table-head"><span>Product</span><span>Category</span><span>Cost / price</span><span>Stock allocation</span><span>Status</span></div>
             {products.map((product) => {
               const units = product.inventories.reduce((sum, inventory) => sum + Number(inventory.quantity), 0);
               const branchNames = product.inventories.map((inventory) => inventory.branch.name).join(", ") || "Not allocated";
-              const rowContent = (
-                <>
-                  <div className="catalog-product-cell"><span>{product.name.slice(0, 1).toUpperCase()}</span><div><strong>{product.name}</strong><small>SKU {product.sku}{product.barcode ? ` · ${product.barcode}` : ""}{canEdit ? " · Click to edit" : ""}</small></div></div>
-                  <div><strong>{product.category?.name ?? "Uncategorized"}</strong><small>{product.trackStock ? "Stock item" : "Service / unlimited"}</small></div>
-                  <div><strong>{money(Number(product.sellingPrice), currency)}</strong><small>Cost {money(Number(product.costPrice), currency)} · Tax {(Number(product.taxRate) * 100).toFixed(2)}%</small></div>
-                  <div><strong>{product.trackStock ? units.toLocaleString("en-KE", { maximumFractionDigits: 3 }) : "Unlimited"}</strong><small title={branchNames}>{branchNames}</small></div>
-                  <span className={`catalog-status ${product.status === "active" ? "active" : "inactive"}`}>{product.status}</span>
-                </>
-              );
-
-              return canEdit ? (
-                <a className="product-table catalog-row-link" href={`/app/products/${product.id}/edit`} key={product.id}>{rowContent}</a>
-              ) : (
-                <div className="product-table" key={product.id}>{rowContent}</div>
-              );
+              const rowContent = <><div className="catalog-product-cell"><span>{product.name.slice(0, 1).toUpperCase()}</span><div><strong>{product.name}</strong><small>SKU {product.sku}{product.barcode ? ` · ${product.barcode}` : ""}{canEdit ? " · Click to edit" : ""}</small></div></div><div><strong>{product.category?.name ?? "Uncategorized"}</strong><small>{product.trackStock ? "Stock item" : "Service / unlimited"}</small></div><div><strong>{money(Number(product.sellingPrice), currency)}</strong><small>Cost {money(Number(product.costPrice), currency)} · Tax {(Number(product.taxRate) * 100).toFixed(2)}%</small></div><div><strong>{product.trackStock ? units.toLocaleString("en-KE", { maximumFractionDigits: 3 }) : "Unlimited"}</strong><small title={branchNames}>{branchNames}</small></div><span className={`catalog-status ${product.status === "active" ? "active" : "inactive"}`}>{product.status}</span></>;
+              return canEdit ? <a className="product-table catalog-row-link" href={`/app/products/${product.id}/edit`} key={product.id}>{rowContent}</a> : <div className="product-table" key={product.id}>{rowContent}</div>;
             })}
           </div>
         )}
