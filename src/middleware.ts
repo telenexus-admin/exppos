@@ -13,6 +13,18 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(login);
     }
   }
+  if (req.nextUrl.pathname.startsWith("/app/") || req.nextUrl.pathname.startsWith("/staff/")) {
+    const token = req.cookies.get("tenant_session")?.value;
+    try {
+      if (!token || !process.env.AUTH_SECRET) throw new Error("missing session");
+      const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.AUTH_SECRET), { algorithms: ["HS256"] });
+      if (payload.kind !== "tenant") throw new Error("wrong session type");
+    } catch {
+      const login = new URL("/login", req.url);
+      login.searchParams.set("next", req.nextUrl.pathname);
+      return NextResponse.redirect(login);
+    }
+  }
   const headers = new Headers(req.headers); headers.set("x-request-id", req.headers.get("x-request-id") ?? crypto.randomUUID());
   const response = NextResponse.next({ request: { headers } });
   response.headers.set("X-Content-Type-Options", "nosniff"); response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
