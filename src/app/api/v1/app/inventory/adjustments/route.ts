@@ -8,12 +8,17 @@ import { appendAudit } from "@/server/audit/audit";
 import { apiError, tenantContext } from "@/server/http";
 import { requirePermission } from "@/server/security/context";
 
+const optionalNonNegativeNumber = z.preprocess(
+  (value) => value === "" || value === null || value === undefined ? undefined : value,
+  z.coerce.number().finite().min(0, "Reorder level cannot be negative").optional(),
+);
+
 const schema = z.object({
   productId: z.string().trim().min(1, "Select a product"),
   branchId: z.string().trim().min(1, "Select a branch"),
   mode: z.enum(["set", "add", "remove"]),
   quantity: z.coerce.number().finite().min(0, "Quantity cannot be negative"),
-  reorderLevel: z.coerce.number().finite().min(0, "Reorder level cannot be negative"),
+  reorderLevel: optionalNonNegativeNumber,
   reason: z.string().trim().min(3, "Enter a reason for this stock change").max(240),
 });
 
@@ -42,7 +47,6 @@ export async function POST(req: NextRequest) {
 
     const body = schema.parse(await req.json());
     const inputQuantity = new Prisma.Decimal(body.quantity);
-    const reorderLevel = new Prisma.Decimal(body.reorderLevel);
 
     if (body.mode !== "set" && inputQuantity.lte(0)) {
       throw new AppError("INVALID_QUANTITY", "Enter a quantity greater than zero", 400);
@@ -77,6 +81,9 @@ export async function POST(req: NextRequest) {
       });
 
       const previousQuantity = existing?.quantity ?? new Prisma.Decimal(0);
+      const reorderLevel = body.reorderLevel === undefined
+        ? existing?.reorderLevel ?? new Prisma.Decimal(0)
+        : new Prisma.Decimal(body.reorderLevel);
       let nextQuantity: Prisma.Decimal;
 
       if (body.mode === "set") nextQuantity = inputQuantity;
