@@ -48,6 +48,7 @@ export default async function InventoryPage() {
   const totalUnits = trackedRows.reduce((sum, row) => sum + Number(row.quantity), 0);
   const lowStockRows = trackedRows.filter((row) => Number(row.quantity) <= Number(row.reorderLevel));
   const outOfStockRows = trackedRows.filter((row) => Number(row.quantity) <= 0);
+  const canEditProducts = session.permissions.has("product.update");
 
   return (
     <PortalShell title="Inventory" role={roleLabel} current="inventory" branchName={tenant.name}>
@@ -55,7 +56,7 @@ export default async function InventoryPage() {
         <div>
           <small>LIVE BRANCH INVENTORY</small>
           <h3>Stock levels, reorder points and adjustments</h3>
-          <p>Select any stock-tracked product, allocate it to a branch, and update quantities. Staff POS checkout reads these exact branch balances.</p>
+          <p>Use Adjust stock for quantities. {canEditProducts ? "Click an inventory row to edit the product name, size or volume wording, pricing, barcode, category, tax, status, or stock tracking." : "Staff POS checkout reads these exact branch balances."}</p>
         </div>
         <InventoryManager
           products={products}
@@ -73,7 +74,7 @@ export default async function InventoryPage() {
 
       <article className="panel catalog-data-panel">
         <div className="catalog-panel-heading">
-          <div><small>BRANCH BALANCES</small><h3>Inventory register</h3><p>Every row is tenant-scoped and tied to one product and one branch.</p></div>
+          <div><small>BRANCH BALANCES</small><h3>Inventory register</h3><p>{canEditProducts ? "Click a row to edit its product details; use Adjust stock to change quantity." : "Every row is tenant-scoped and tied to one product and one branch."}</p></div>
           <span>{inventory.length} allocation{inventory.length === 1 ? "" : "s"}</span>
         </div>
 
@@ -96,15 +97,20 @@ export default async function InventoryPage() {
               const low = !isService && !out && quantity <= reorderLevel;
               const status = isService ? "Unlimited" : out ? "Out of stock" : low ? "Low stock" : "In stock";
               const statusClass = isService ? "service" : out ? "danger" : low ? "warning" : "active";
-
-              return (
-                <div className="inventory-table" key={row.id}>
-                  <div className="catalog-product-cell"><span>{row.product.name.slice(0, 1).toUpperCase()}</span><div><strong>{row.product.name}</strong><small>{row.product.sku} · {row.product.category?.name ?? "Uncategorized"}</small></div></div>
+              const rowContent = (
+                <>
+                  <div className="catalog-product-cell"><span>{row.product.name.slice(0, 1).toUpperCase()}</span><div><strong>{row.product.name}</strong><small>{row.product.sku} · {row.product.category?.name ?? "Uncategorized"}{canEditProducts ? " · Click to edit product" : ""}</small></div></div>
                   <div><strong>{row.branch.name}</strong><small>{row.branch.code}</small></div>
                   <div><strong>{isService ? "Unlimited" : quantity.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><small>{isService ? "Stock tracking disabled" : "Current balance"}</small></div>
                   <div><strong>{isService ? "—" : reorderLevel.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><small>Restock threshold</small></div>
                   <span className={`catalog-status ${statusClass}`}>{status}</span>
-                </div>
+                </>
+              );
+
+              return canEditProducts ? (
+                <a className="inventory-table catalog-row-link" href={`/app/products/${row.product.id}/edit`} key={row.id}>{rowContent}</a>
+              ) : (
+                <div className="inventory-table" key={row.id}>{rowContent}</div>
               );
             })}
           </div>
