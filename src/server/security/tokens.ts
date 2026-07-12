@@ -7,6 +7,9 @@ export async function signAccessToken(ctx: Omit<TenantContext, "permissions"> & 
   return new SignJWT({ kind: ctx.kind, tenantId: ctx.tenantId, branchIds: ctx.branchIds, permissions: [...ctx.permissions] })
     .setProtectedHeader({ alg: "HS256" }).setSubject(ctx.userId).setJti(ctx.requestId).setIssuedAt().setExpirationTime("15m").sign(secret());
 }
+export async function signOperatorToken(userId: string) {
+  return new SignJWT({ kind: "operator" }).setProtectedHeader({ alg: "HS256" }).setSubject(userId).setIssuedAt().setExpirationTime("8h").sign(secret());
+}
 export async function verifyAccessToken(token: string) {
   const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
   return payload;
