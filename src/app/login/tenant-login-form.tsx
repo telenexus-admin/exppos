@@ -1,3 +1,58 @@
 "use client";
-import{useState,type FormEvent}from"react";
-export function TenantLoginForm(){const[error,setError]=useState("");const[loading,setLoading]=useState(false);async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();setError("");setLoading(true);const data=new FormData(event.currentTarget);const response=await fetch("/api/v1/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({tenantSlug:data.get("tenantSlug"),identifier:data.get("identifier"),password:data.get("password")})});const body=await response.json().catch(()=>({}));if(!response.ok){setError(body?.error?.message??"Unable to sign in. Check your business code and credentials.");setLoading(false);return}window.location.href=body.destination??"/app/dashboard"}return <form className="login-card" onSubmit={submit}><p className="eyebrow">BUSINESS SIGN IN</p><h2>Welcome back</h2><label>Tenant slug or business code<input name="tenantSlug" placeholder="your-business or CODE-001" required autoComplete="organization"/></label><label>Email or phone<input name="identifier" placeholder="you@company.com" required autoComplete="username"/></label><label>Password<input name="password" type="password" required autoComplete="current-password"/></label>{error&&<p className="form-error" role="alert">{error}</p>}<button className="primary" type="submit" disabled={loading}>{loading?"Signing in...":"Sign in securely"}</button><small>Use the tenant slug or business code and temporary password supplied during onboarding.</small></form>}
+
+import { useState, type FormEvent } from "react";
+
+export function TenantLoginForm() {
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+
+    const data = new FormData(event.currentTarget);
+    const response = await fetch("/api/v1/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        tenantSlug: data.get("tenantSlug"),
+        identifier: data.get("identifier"),
+        password: data.get("password"),
+      }),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setError(body?.error?.message ?? "Unable to sign in. Check your business code and credentials.");
+      setLoading(false);
+      return;
+    }
+
+    window.location.href = body.destination ?? "/app/dashboard";
+  }
+
+  return (
+    <form className="login-card" onSubmit={submit}>
+      <p className="eyebrow">BUSINESS SIGN IN</p>
+      <h2>Welcome back</h2>
+      <label>
+        Business slug or code
+        <input name="tenantSlug" placeholder="your-business or CODE-001" required autoComplete="organization" />
+      </label>
+      <label>
+        Username, email, or phone
+        <input name="identifier" placeholder="mary.w or you@company.com" required autoComplete="username" />
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" required autoComplete="current-password" />
+      </label>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <button className="primary" type="submit" disabled={loading}>
+        {loading ? "Signing in..." : "Sign in securely"}
+      </button>
+      <small>Staff should use the business code, username, and temporary password supplied by the administrator.</small>
+    </form>
+  );
+}

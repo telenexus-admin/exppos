@@ -1,0 +1,15 @@
+@media (max-width: 820px) {
+  .portal .portal-sidebar {
+    display: flex;
+  }
+
+  .portal .portal-collapse-button {
+    display: grid;
+  }
+
+  .portal--collapsed .portal-sidebar {
+    width: 0;
+    padding-inline: 0;
+    overflow: hidden;
+  }
+}
