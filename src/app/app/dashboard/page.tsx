@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
+import { LiveDataRefresh } from "@/components/live-data-refresh";
 import { PortalShell } from "@/components/portal-shell";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const NAIROBI_TIMEZONE = "Africa/Nairobi";
 
@@ -41,7 +44,8 @@ function formatQuantity(value: number) {
 
 export default async function Dashboard() {
   const session = await requireCurrentTenant();
-  const branchIds = [...session.branchIds];
+  const scope = await resolveTenantAccessScope(db, session);
+  const branchIds = scope.branchIds;
   const { start, end } = nairobiDayRange();
 
   const user = await db.user.findFirst({
@@ -52,13 +56,16 @@ export default async function Dashboard() {
     },
     include: {
       tenant: true,
-      roles: { include: { role: true } },
+      roles: {
+        where: { role: { tenantId: session.tenantId } },
+        include: { role: true },
+      },
     },
   });
 
   if (!user) redirect("/login");
 
-  const [sales, activeShifts, inventoryRows, outstandingInvoices] = await Promise.all([
+  const [sales, activeShifts, inventoryRows, outstandingInvoices, recentSales] = await Promise.all([
     db.sale.findMany({
       where: {
         tenantId: session.tenantId,
@@ -91,7 +98,7 @@ export default async function Dashboard() {
       where: {
         tenantId: session.tenantId,
         branchId: { in: branchIds },
-        product: { status: "active" },
+        product: { tenantId: session.tenantId, status: "active" },
       },
       include: {
         product: { select: { name: true } },
@@ -102,10 +109,29 @@ export default async function Dashboard() {
     db.invoice.findMany({
       where: {
         tenantId: session.tenantId,
+        branchId: { in: branchIds },
         balance: { gt: 0 },
         status: { notIn: ["CANCELLED", "VOIDED", "REFUNDED"] },
       },
       select: { balance: true },
+    }),
+    db.sale.findMany({
+      where: {
+        tenantId: session.tenantId,
+        branchId: { in: branchIds },
+        status: "COMPLETED",
+      },
+      include: {
+        branch: { select: { id: true, name: true, code: true } },
+        cashier: { select: { id: true, fullName: true, staffNumber: true, tenantId: true } },
+        payments: {
+          where: { tenantId: session.tenantId, status: "COMPLETED" },
+          select: { method: true, amount: true },
+        },
+        _count: { select: { items: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 8,
     }),
   ]);
 
@@ -145,7 +171,7 @@ export default async function Dashboard() {
 
   const maximumBucket = Math.max(...salesByTwoHours, 0);
   const firstName = user.fullName.trim().split(/\s+/)[0] || user.fullName;
-  const roleLabel = user.roles.map(({ role }) => role.name).join(", ") || "Team member";
+  const roleLabel = scope.roleNames.join(", ") || "Team member";
   const currency = user.tenant.currency || "KES";
 
   const metrics = [
@@ -166,12 +192,19 @@ export default async function Dashboard() {
   ];
 
   return (
-    <PortalShell title={`Welcome, ${firstName}`} role={roleLabel}>
-      <div className="filters">
-        <button className="chip active" type="button">Today</button>
-        <button className="chip" type="button" disabled>This week</button>
-        <button className="chip" type="button" disabled>This month</button>
-        <button className="chip" type="button" disabled>Assigned branches</button>
+    <PortalShell
+      title={`Welcome, ${firstName}`}
+      role={roleLabel}
+      branchName={`${user.tenant.name} · ${user.tenant.code}`}
+    >
+      <div className="dashboard-live-row">
+        <div className="filters">
+          <button className="chip active" type="button">Today</button>
+          <button className="chip" type="button" disabled>This week</button>
+          <button className="chip" type="button" disabled>This month</button>
+          <button className="chip" type="button" disabled>{scope.isTenantAdmin ? "All tenant branches" : "Assigned branches"}</button>
+        </div>
+        <LiveDataRefresh />
       </div>
 
       <div className="metrics">
@@ -198,7 +231,7 @@ export default async function Dashboard() {
             <div className="empty-state">
               <span>0</span>
               <h3>No sales recorded today</h3>
-              <p>This chart will update automatically when this business completes its first sale.</p>
+              <p>Completed staff POS sales for this account will appear here automatically.</p>
             </div>
           ) : (
             <div className="bars" aria-label="Sales grouped into two-hour intervals">
@@ -247,6 +280,41 @@ export default async function Dashboard() {
           )}
         </article>
       </div>
+
+      <article className="panel dashboard-sales-panel">
+        <div className="panel-head">
+          <div>
+            <small>LIVE SALES REGISTER</small>
+            <h3>Latest completed sales</h3>
+            <p>Sales are isolated to {user.tenant.name} and the branches this account is allowed to view.</p>
+          </div>
+          <a className="notification-link" href="/app/sales">Open full sales register</a>
+        </div>
+
+        {recentSales.length === 0 ? (
+          <div className="empty-state">
+            <span>0</span>
+            <h3>No completed sales yet</h3>
+            <p>When a staff member completes checkout, the sale will appear here within 15 seconds.</p>
+          </div>
+        ) : (
+          <div className="dashboard-sales-table-wrap">
+            <div className="dashboard-sales-row dashboard-sales-head">
+              <span>Sale</span><span>Branch</span><span>Cashier</span><span>Payment</span><span>Total</span><span>Time</span>
+            </div>
+            {recentSales.map((sale) => (
+              <div className="dashboard-sales-row" key={sale.id}>
+                <div><strong>{sale.saleNumber}</strong><small>{sale._count.items} item{sale._count.items === 1 ? "" : "s"}</small></div>
+                <div><strong>{sale.branch.name}</strong><small>{sale.branch.code}</small></div>
+                <div><strong>{sale.cashier.fullName}</strong><small>@{sale.cashier.staffNumber}</small></div>
+                <div><strong>{sale.payments.map((payment) => payment.method).join(", ") || "Unspecified"}</strong><small>{sale.payments.length} payment{sale.payments.length === 1 ? "" : "s"}</small></div>
+                <strong>{formatMoney(Number(sale.total), currency)}</strong>
+                <time dateTime={sale.createdAt.toISOString()}>{sale.createdAt.toLocaleString("en-KE", { timeZone: user.tenant.timezone, dateStyle: "short", timeStyle: "short" })}</time>
+              </div>
+            ))}
+          </div>
+        )}
+      </article>
     </PortalShell>
   );
 }
