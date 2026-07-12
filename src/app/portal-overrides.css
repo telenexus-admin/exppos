@@ -1,2 +1,3 @@
 .portal-v2 .portal-sidebar{display:flex;padding:20px 14px;background:#081a14;color:#dcece5}
-@media(max-width:720px){.portal-v2 .portal-sidebar{display:flex}}
+.shift-start-card{position:relative;z-index:1;display:grid;gap:16px;width:min(500px,100%);padding:28px;border-radius:20px;background:#fff;box-shadow:0 30px 100px #0006}.shift-start-card label{display:grid;gap:7px;font-size:.82rem;font-weight:700}.shift-start-card input,.shift-start-card select{width:100%;padding:12px 13px;border:1px solid #cad8d2;border-radius:9px;background:#fff;color:#13241e;font:inherit}.staff-empty-shift .primary{display:inline-flex;margin-top:14px}
+@media(max-width:720px){.portal-v2 .portal-sidebar{display:flex}.shift-start-card{padding:20px}}
