@@ -2,10 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { hashToken, newRefreshToken, signAccessToken } from "@/server/security/tokens";
+import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 import type { Permission } from "@/server/security/context";
 
 const ACTIVE_TENANT_STATUSES = ["TRIAL", "ACTIVE", "GRACE_PERIOD"] as const;
-const ACCESS_MAX_AGE_SECONDS = 15 * 60;
 const REFRESH_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 function safeNextPath(req: NextRequest) {
@@ -40,7 +40,7 @@ async function refreshSession(req: NextRequest, redirectAfterRefresh: boolean) {
     include: {
       user: {
         include: {
-          tenant: true,
+          tenant: { include: { settings: true } },
           branches: true,
           roles: {
             include: {
@@ -77,6 +77,7 @@ async function refreshSession(req: NextRequest, redirectAfterRefresh: boolean) {
     ),
   );
   const requestId = req.headers.get("x-request-id") ?? randomUUID();
+  const sessionTimeoutMinutes = normalizeTenantSettings(user.tenant.settings?.metadata).securityNotifications.sessionTimeoutMinutes;
   const accessToken = await signAccessToken({
     kind: "tenant",
     userId: user.id,
@@ -84,7 +85,7 @@ async function refreshSession(req: NextRequest, redirectAfterRefresh: boolean) {
     branchIds: user.branches.map((branch) => branch.branchId),
     permissions,
     requestId,
-  });
+  }, sessionTimeoutMinutes);
   const nextRefreshToken = newRefreshToken();
 
   await db.userSession.update({
@@ -108,7 +109,7 @@ async function refreshSession(req: NextRequest, redirectAfterRefresh: boolean) {
     secure,
     sameSite: "strict",
     path: "/",
-    maxAge: ACCESS_MAX_AGE_SECONDS,
+    maxAge: sessionTimeoutMinutes * 60,
   });
   response.cookies.set("tenant_refresh", nextRefreshToken.raw, {
     httpOnly: true,
