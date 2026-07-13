@@ -14,6 +14,7 @@ import "./product-edit.css";
 import "./operator-admin-login.css";
 import "./tenant-operations.css";
 import "./tenant-settings.css";
+import "./account-controls.css";
 
 export const metadata = { title: "Speedyhive Cloud POS", description: "Secure multi-tenant POS management" };
 export default function RootLayout({ children }: { children: ReactNode }) {
