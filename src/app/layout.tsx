@@ -15,8 +15,9 @@ import "./operator-admin-login.css";
 import "./tenant-operations.css";
 import "./tenant-settings.css";
 import "./account-controls.css";
+import { TenantAccountMount } from "@/components/tenant-account-mount";
 
 export const metadata = { title: "Speedyhive Cloud POS", description: "Secure multi-tenant POS management" };
 export default function RootLayout({ children }: { children: ReactNode }) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="en"><body>{children}<TenantAccountMount /></body></html>;
 }
