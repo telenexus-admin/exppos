@@ -18,13 +18,7 @@ type LoginResponse = {
   };
 };
 
-export function TenantLoginForm({
-  initialBusinessKey = "",
-  switching = false,
-}: {
-  initialBusinessKey?: string;
-  switching?: boolean;
-}) {
+export function TenantLoginForm({ switching = false }: { switching?: boolean }) {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,25 +32,20 @@ export function TenantLoginForm({
     setStatus("");
 
     const data = new FormData(event.currentTarget);
-    const tenantSlug = String(data.get("tenantSlug") ?? "").trim();
     const identifier = String(data.get("identifier") ?? "").trim();
     const password = String(data.get("password") ?? "");
 
-    if (tenantSlug.length < 2) {
-      setError("Enter the business code, slug, or business email shown in the operator panel.");
-      return;
-    }
     if (identifier.length < 3) {
-      setError("Enter the administrator/staff username, email address, phone number, or the tenant business email.");
+      setError("Enter your username, email address, or phone number.");
       return;
     }
     if (!password) {
-      setError("Enter the password supplied by the operator or administrator.");
+      setError("Enter your password.");
       return;
     }
 
     setLoading(true);
-    setStatus("Checking your business and login credentials…");
+    setStatus("Checking your login credentials…");
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 30_000);
@@ -71,7 +60,7 @@ export function TenantLoginForm({
           "content-type": "application/json",
           accept: "application/json",
         },
-        body: JSON.stringify({ tenantSlug, identifier, password }),
+        body: JSON.stringify({ identifier, password }),
         signal: controller.signal,
       });
 
@@ -88,7 +77,9 @@ export function TenantLoginForm({
 
       if (!response.ok) {
         if (response.status === 401) {
-          setError(body.error?.message ?? "Incorrect business code, administrator/staff username, or password.");
+          setError(body.error?.message ?? "Incorrect username, email, phone number, or password.");
+        } else if (response.status === 409 && body.error?.code === "AMBIGUOUS_IDENTIFIER") {
+          setError(body.error.message ?? "Use a unique email address or phone number for this account.");
         } else if (response.status === 429) {
           setError(body.error?.message ?? "Too many login attempts. Wait a few minutes and try again.");
         } else {
@@ -127,36 +118,20 @@ export function TenantLoginForm({
       <p className="eyebrow">ADMIN &amp; STAFF SIGN IN</p>
       <h2>Welcome back</h2>
       <p className="tenant-login-help">
-        Tenant administrators created in the operator panel use this page. Enter the business code,
-        slug, or business email, then the administrator email/username and temporary password.
+        Use your username, email address, or phone number together with your password. A business code is no longer required.
       </p>
 
       {switching && (
         <p className="tenant-switch-notice" role="status">
-          The previous business session was cleared. You are now signing in to a different tenant account.
+          The previous business session was cleared. Sign in with the administrator or staff credentials for the account you want to open.
         </p>
       )}
 
       <label>
-        Business code, slug, or business email
-        <input
-          name="tenantSlug"
-          placeholder="CODE-001, your-business, or business@email.com"
-          required
-          minLength={2}
-          autoComplete="organization"
-          autoCapitalize="none"
-          spellCheck={false}
-          disabled={loading}
-          defaultValue={initialBusinessKey}
-        />
-      </label>
-
-      <label>
-        Administrator/staff username, email, or phone
+        Username, email, or phone
         <input
           name="identifier"
-          placeholder="STAFF-000001 or admin@business.com"
+          placeholder="dennis, admin@business.com, or 07…"
           required
           minLength={3}
           autoComplete="username"
