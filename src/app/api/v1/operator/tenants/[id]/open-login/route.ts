@@ -43,7 +43,6 @@ export async function GET(
     }).catch((error) => console.error("Unable to audit tenant login switch", error));
 
     const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("business", tenant.code);
     loginUrl.searchParams.set("switch", "1");
 
     const response = NextResponse.redirect(loginUrl);

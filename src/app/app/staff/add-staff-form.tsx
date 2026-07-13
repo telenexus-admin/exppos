@@ -8,7 +8,6 @@ type BranchOption = { id: string; name: string; code: string };
 
 type CreatedCredentials = {
   fullName: string;
-  businessCode: string;
   username: string;
   password: string;
   branch: string;
@@ -75,7 +74,7 @@ export function AddStaffForm({
         return;
       }
 
-      if (!body?.staff?.username || !body?.staff?.businessCode) {
+      if (!body?.staff?.username) {
         setError("The account was created, but its login details could not be displayed. Refresh the staff page to confirm the account.");
         router.refresh();
         return;
@@ -83,7 +82,6 @@ export function AddStaffForm({
 
       setCredentials({
         fullName: body.staff.fullName,
-        businessCode: body.staff.businessCode,
         username: body.staff.username,
         password,
         branch: body.staff.branch,
@@ -106,7 +104,6 @@ export function AddStaffForm({
     const text = [
       `Speedyhive POS login for ${credentials.fullName}`,
       `Login: ${credentials.loginUrl}`,
-      `Business code: ${credentials.businessCode}`,
       `Username: ${credentials.username}`,
       `Temporary password: ${credentials.password}`,
       `Role: ${credentials.role}`,
@@ -200,7 +197,6 @@ export function AddStaffForm({
           <h4>Credentials created</h4>
           <p>Copy and send these credentials securely. The temporary password is only displayed here.</p>
           <div className="staff-credential-row"><span>Login page</span><code>{credentials.loginUrl}</code></div>
-          <div className="staff-credential-row"><span>Business code</span><code>{credentials.businessCode}</code></div>
           <div className="staff-credential-row"><span>Username</span><code>{credentials.username}</code></div>
           <div className="staff-credential-row"><span>Password</span><code>{credentials.password}</code></div>
           <div className="staff-credential-row"><span>Role</span><code>{credentials.role}</code></div>

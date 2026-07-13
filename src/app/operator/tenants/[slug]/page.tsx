@@ -99,20 +99,17 @@ export default async function TenantDetails({
           {admin ? (
             <>
               <dl className="client-details operator-login-details">
-                <div><dt>Business code</dt><dd>{tenant.code}</dd></div>
-                <div><dt>Business slug</dt><dd>{tenant.slug}</dd></div>
                 <div><dt>Administrator email</dt><dd>{admin.email}</dd></div>
                 <div><dt>Administrator username</dt><dd>{admin.staffNumber}</dd></div>
                 <div><dt>Administrator phone</dt><dd>{admin.phone ?? "Not provided"}</dd></div>
-                <div><dt>Business email alias</dt><dd>{tenant.email}</dd></div>
+                <div><dt>Account status</dt><dd>{admin.status.toLowerCase()}</dd></div>
               </dl>
               <div className="operator-login-instructions">
                 <strong>How the administrator should sign in</strong>
-                <span>First field: {tenant.code}, {tenant.slug}, or {tenant.email}</span>
-                <span>Second field: {admin.email}, {admin.staffNumber}, {admin.phone ?? "administrator phone"}, or {tenant.email}</span>
-                <span>Third field: the temporary password entered during onboarding.</span>
+                <span>First field: use {admin.staffNumber}, {admin.email}, or {admin.phone ?? "the administrator phone number"}.</span>
+                <span>Second field: use the temporary password entered during onboarding.</span>
                 <small>
-                  Open isolated client login clears the previous tenant session before this client signs in, preventing data from another account being displayed.
+                  A business code or slug is no longer required. Open isolated client login still clears the previous tenant session before this client signs in.
                 </small>
               </div>
             </>
@@ -130,6 +127,8 @@ export default async function TenantDetails({
             <a className="manage-link" href={`/operator/tenants/${tenant.slug}/edit`}>Edit client →</a>
           </div>
           <dl className="client-details">
+            <div><dt>Business code</dt><dd>{tenant.code}</dd></div>
+            <div><dt>Business slug</dt><dd>{tenant.slug}</dd></div>
             <div><dt>Business email</dt><dd>{tenant.email}</dd></div>
             <div><dt>Primary phone</dt><dd>{tenant.phone}</dd></div>
             <div><dt>Currency</dt><dd>{tenant.currency}</dd></div>
