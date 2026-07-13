@@ -5,6 +5,7 @@ import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { requirePermission } from "@/server/security/context";
 import { AddStaffForm } from "./add-staff-form";
+import { StaffStatusControl } from "./staff-status-control";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -69,6 +70,7 @@ export default async function StaffPage() {
 
   const viewerRole = scope.roleNames.join(", ") || "Tenant user";
   const maxUsers = tenant.subscription?.plan.maxUsers ?? 1;
+  const canManageStaff = scope.isTenantAdmin && session.permissions.has("staff.update");
 
   return (
     <PortalShell title="Staff management" role={viewerRole} current="staff" branchName={`${tenant.name} · ${tenant.code}`}>
@@ -83,7 +85,7 @@ export default async function StaffPage() {
             <div>
               <small>TEAM DIRECTORY</small>
               <h3>Staff accounts</h3>
-              <p>Manage staff login usernames, roles, and branch allocation for {tenant.name}.</p>
+              <p>Manage staff login usernames, roles, branch allocation, and account access for {tenant.name}.</p>
             </div>
             <span className="staff-count-badge">{staff.length} / {maxUsers} users</span>
           </div>
@@ -96,19 +98,22 @@ export default async function StaffPage() {
             </div>
           ) : (
             <>
-              <div className="staff-table-head">
+              <div className="staff-table-head staff-table-head--actions">
                 <span>Staff member</span>
                 <span>Role</span>
                 <span>Branch</span>
                 <span>Status</span>
+                <span>Action</span>
               </div>
               {staff.map((member) => {
                 const visibleEmail = member.email.endsWith(".staff.local") ? null : member.email;
                 const roleNames = member.roles.map(({ role }) => role.name).join(", ") || "No role";
                 const branchNames = member.branches.map(({ branch }) => branch.name).join(", ") || "No branch";
+                const isTenantAdmin = member.roles.some(({ role }) => role.code === "TENANT_ADMIN");
+                const protectedAccount = member.id === session.userId || isTenantAdmin;
 
                 return (
-                  <div className="staff-table-row" key={member.id}>
+                  <div className="staff-table-row staff-table-row--actions" key={member.id}>
                     <div className="staff-identity">
                       <span className="staff-avatar">{initials(member.fullName)}</span>
                       <div>
@@ -119,9 +124,19 @@ export default async function StaffPage() {
                     <div className="staff-role-cell"><span>{roleNames}</span><small>Access level</small></div>
                     <div className="staff-branch-cell"><span>{branchNames}</span><small>Assigned location</small></div>
                     <span className={`staff-status ${member.status.toLowerCase()}`}>{member.status.toLowerCase()}</span>
+                    <StaffStatusControl
+                      staffId={member.id}
+                      staffName={member.fullName}
+                      status={member.status === "SUSPENDED" ? "SUSPENDED" : "ACTIVE"}
+                      canManage={canManageStaff}
+                      protectedAccount={protectedAccount}
+                    />
                   </div>
                 );
               })}
+              <p className="staff-management-note">
+                Deactivation is the safe delete option: it blocks login and revokes sessions while preserving sales, shifts, stock movements, and audit history. Reactivate the account from the same column.
+              </p>
             </>
           )}
         </article>
