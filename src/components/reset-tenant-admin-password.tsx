@@ -5,9 +5,6 @@ import { useState, type FormEvent } from "react";
 type ResetResponse = {
   ok?: boolean;
   login?: {
-    businessCode: string;
-    businessSlug: string;
-    businessEmail: string;
     adminName: string;
     adminEmail: string;
     adminUsername: string;
@@ -118,8 +115,6 @@ export function ResetTenantAdminPassword({
     if (!result) return;
     const text = [
       `Login: ${window.location.origin}/login`,
-      `Business code: ${result.businessCode}`,
-      `Business slug: ${result.businessSlug}`,
       `Administrator email: ${result.adminEmail}`,
       `Administrator username: ${result.adminUsername}`,
       `Temporary password: ${password}`,
