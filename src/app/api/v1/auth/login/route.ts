@@ -3,28 +3,23 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import { AppError } from "@/lib/errors";
 import { apiError } from "@/server/http";
 import { verifySecret } from "@/server/security/passwords";
 import { newRefreshToken, signAccessToken } from "@/server/security/tokens";
 import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
-import { AppError } from "@/lib/errors";
 import type { Permission } from "@/server/security/context";
 
 const schema = z.object({
-  tenantSlug: z.string().trim().min(2, "Enter the business code, slug, or business email"),
-  identifier: z.string().trim().min(3, "Enter the administrator/staff username, email address, or phone number"),
-  password: z.string().min(1, "Enter the password supplied by the operator or administrator"),
+  identifier: z.string().trim().min(3, "Enter your username, email address, or phone number"),
+  password: z.string().min(1, "Enter your password"),
 });
 const activeTenantStatuses = ["TRIAL", "ACTIVE", "GRACE_PERIOD"] as const;
 const userInclude = {
-  tenant: true,
+  tenant: { include: { settings: true } },
   branches: true,
   roles: { include: { role: { include: { rolePermissions: { include: { permission: true } } } } } },
 } satisfies Prisma.UserInclude;
-
-function loginAttemptHash(businessKey: string, identifier: string) {
-  return createHash("sha256").update(`${businessKey.trim().toLowerCase()}:${identifier.trim().toLowerCase()}`).digest("hex");
-}
 
 function phoneCandidates(value: string) {
   const raw = value.trim();
@@ -43,16 +38,27 @@ function phoneCandidates(value: string) {
   return [...candidates].filter(Boolean);
 }
 
-async function recordLoginAttempt({ tenantSlug, identifierHash, ipAddress, succeeded }: {
-  tenantSlug: string;
+function normalizedAttemptIdentifier(value: string) {
+  const compact = value.trim().replace(/[\s()-]/g, "").toLowerCase();
+  if (/^\+254\d{9}$/.test(compact)) return compact.slice(1);
+  if (/^0\d{9}$/.test(compact)) return `254${compact.slice(1)}`;
+  return compact;
+}
+
+function loginAttemptHash(identifier: string) {
+  return createHash("sha256").update(`tenant-login:${normalizedAttemptIdentifier(identifier)}`).digest("hex");
+}
+
+async function recordLoginAttempt({ tenantKey, identifierHash, ipAddress, succeeded }: {
+  tenantKey: string;
   identifierHash: string;
   ipAddress?: string;
   succeeded: boolean;
 }) {
   try {
-    await db.loginAttempt.create({ data: { tenantSlug, identifierHash, ipAddress, succeeded } });
+    await db.loginAttempt.create({ data: { tenantSlug: tenantKey, identifierHash, ipAddress, succeeded } });
   } catch (error) {
-    console.error("Login attempt logging failed", { tenantSlug, succeeded, error });
+    console.error("Login attempt logging failed", { tenantKey, succeeded, error });
   }
 }
 
@@ -67,24 +73,30 @@ export async function POST(req: NextRequest) {
     }
 
     const body = schema.parse(await req.json());
+    const rawIdentifier = body.identifier.trim();
+    const normalizedIdentifier = rawIdentifier.toLowerCase();
     const ipAddress = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-    const businessKey = body.tenantSlug.trim();
-    const normalizedIdentifier = body.identifier.trim().toLowerCase();
-    const identifierHash = loginAttemptHash(businessKey, normalizedIdentifier);
+    const identifierHash = loginAttemptHash(rawIdentifier);
 
-    const tenant = await db.tenant.findFirst({
+    const candidates = await db.user.findMany({
       where: {
-        status: { in: [...activeTenantStatuses] },
+        status: "ACTIVE",
+        tenant: { status: { in: [...activeTenantStatuses] } },
         OR: [
-          { slug: businessKey.toLowerCase() },
-          { code: businessKey.toUpperCase() },
-          { email: businessKey.toLowerCase() },
+          { email: normalizedIdentifier },
+          { phone: { in: phoneCandidates(rawIdentifier) } },
+          { staffNumber: { equals: rawIdentifier, mode: "insensitive" } },
         ],
       },
-      select: { id: true, name: true, email: true, settings: { select: { metadata: true } } },
+      include: userInclude,
+      orderBy: { createdAt: "asc" },
+      take: 26,
     });
 
-    const security = normalizeTenantSettings(tenant?.settings?.metadata).securityNotifications;
+    const defaultSecurity = normalizeTenantSettings(undefined).securityNotifications;
+    const failedLoginLimit = candidates.length > 0
+      ? Math.min(...candidates.map((candidate) => normalizeTenantSettings(candidate.tenant.settings?.metadata).securityNotifications.failedLoginLimit))
+      : defaultSecurity.failedLoginLimit;
     const recentFailures = await db.loginAttempt.count({
       where: {
         identifierHash,
@@ -92,56 +104,44 @@ export async function POST(req: NextRequest) {
         succeeded: false,
       },
     });
-    if (recentFailures >= security.failedLoginLimit) {
+    if (recentFailures >= failedLoginLimit) {
       throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
     }
 
-    if (!tenant) {
-      await recordLoginAttempt({ tenantSlug: businessKey, identifierHash, ipAddress, succeeded: false });
-      throw new AppError("INVALID_CREDENTIALS", "Incorrect business code, administrator/staff username, or password", 401);
+    if (candidates.length > 25) {
+      await recordLoginAttempt({ tenantKey: "ambiguous", identifierHash, ipAddress, succeeded: false });
+      throw new AppError(
+        "AMBIGUOUS_IDENTIFIER",
+        "This username is used by several business accounts. Sign in with your unique email address or phone number.",
+        409,
+      );
     }
 
-    let user = normalizedIdentifier === tenant.email.toLowerCase()
-      ? await db.user.findFirst({
-          where: {
-            tenantId: tenant.id,
-            status: "ACTIVE",
-            roles: { some: { role: { tenantId: tenant.id, code: "TENANT_ADMIN" } } },
-          },
-          include: userInclude,
-          orderBy: { createdAt: "asc" },
-        })
-      : null;
-
-    if (!user) {
-      user = await db.user.findFirst({
-        where: {
-          tenantId: tenant.id,
-          status: "ACTIVE",
-          OR: [
-            { email: normalizedIdentifier },
-            { phone: { in: phoneCandidates(body.identifier) } },
-            { staffNumber: { equals: body.identifier.trim(), mode: "insensitive" } },
-          ],
-        },
-        include: userInclude,
-      });
-    }
-
-    let passwordValid = false;
-    if (user) {
+    const checked = await Promise.all(candidates.map(async (candidate) => {
       try {
-        passwordValid = await verifySecret(user.passwordHash, body.password);
+        return { candidate, valid: await verifySecret(candidate.passwordHash, body.password) };
       } catch (error) {
-        console.error("Password verification failed", { userId: user.id, error });
+        console.error("Password verification failed", { userId: candidate.id, error });
+        return { candidate, valid: false };
       }
+    }));
+    const matches = checked.filter(({ valid }) => valid).map(({ candidate }) => candidate);
+
+    if (matches.length === 0) {
+      await recordLoginAttempt({ tenantKey: "global", identifierHash, ipAddress, succeeded: false });
+      throw new AppError("INVALID_CREDENTIALS", "Incorrect username, email, phone number, or password", 401);
+    }
+    if (matches.length > 1) {
+      await recordLoginAttempt({ tenantKey: "ambiguous", identifierHash, ipAddress, succeeded: false });
+      throw new AppError(
+        "AMBIGUOUS_IDENTIFIER",
+        "These credentials match more than one business account. Use a unique email address or phone number, or ask an administrator to change the duplicate username.",
+        409,
+      );
     }
 
-    if (!user || !passwordValid) {
-      await recordLoginAttempt({ tenantSlug: tenant.id, identifierHash, ipAddress, succeeded: false });
-      throw new AppError("INVALID_CREDENTIALS", "Incorrect business code, administrator/staff username, or password", 401);
-    }
-
+    const user = matches[0];
+    const security = normalizeTenantSettings(user.tenant.settings?.metadata).securityNotifications;
     const roleCodes = user.roles.map((userRole) => userRole.role.code);
     if (roleCodes.length === 0) {
       throw new AppError("ACCOUNT_NOT_READY", "This account has no role assigned. Ask the administrator or operator to update it.", 409);
@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
       throw new AppError("SESSION_CREATE_FAILED", "Your credentials are correct, but the session could not be opened. Try again.", 503);
     }
 
-    await recordLoginAttempt({ tenantSlug: tenant.id, identifierHash, ipAddress, succeeded: true });
+    await recordLoginAttempt({ tenantKey: user.tenantId, identifierHash, ipAddress, succeeded: true });
     const destination = roleCodes.includes("TENANT_ADMIN") ? "/app/dashboard" : "/staff/dashboard";
     const response = NextResponse.json({
       ok: true,
