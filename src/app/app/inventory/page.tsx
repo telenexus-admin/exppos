@@ -8,9 +8,15 @@ import { InventoryManager } from "./inventory-manager";
 
 export const dynamic = "force-dynamic";
 
-export default async function InventoryPage() {
+export default async function InventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ stock?: string }>;
+}) {
   const session = await requireCurrentTenant();
   requirePermission(session, "inventory.view");
+  const query = await searchParams;
+  const stockFilter = query.stock === "out" || query.stock === "low" ? query.stock : null;
 
   const [viewer, tenant, branches, products, inventory] = await Promise.all([
     db.user.findFirst({
@@ -48,10 +54,16 @@ export default async function InventoryPage() {
   const trackedRows = inventory.filter((row) => row.product.trackStock);
   const totalUnits = trackedRows.reduce((sum, row) => sum + Number(row.quantity), 0);
   const settings = normalizeTenantSettings(tenant.settings?.metadata);
-  const lowStockRows = settings.inventory.lowStockAlerts
-    ? trackedRows.filter((row) => Number(row.quantity) <= Number(row.reorderLevel))
-    : [];
   const outOfStockRows = trackedRows.filter((row) => Number(row.quantity) <= 0);
+  const lowStockRows = settings.inventory.lowStockAlerts
+    ? trackedRows.filter((row) => Number(row.quantity) > 0 && Number(row.quantity) <= Number(row.reorderLevel))
+    : [];
+  const filteredInventory = stockFilter === "out"
+    ? inventory.filter((row) => row.product.trackStock && Number(row.quantity) <= 0)
+    : stockFilter === "low"
+      ? inventory.filter((row) => row.product.trackStock && Number(row.quantity) > 0 && Number(row.quantity) <= Number(row.reorderLevel))
+      : inventory;
+  const filterLabel = stockFilter === "out" ? "Out-of-stock items" : stockFilter === "low" ? "Low-stock items" : "Inventory register";
   const canEditProducts = session.permissions.has("product.update");
 
   return (
@@ -71,24 +83,35 @@ export default async function InventoryPage() {
       </section>
 
       <section className="catalog-summary-grid">
-        <article><small>Stock products</small><strong>{products.filter((product) => product.trackStock).length}</strong><span>Selectable for adjustments</span></article>
-        <article><small>Total units</small><strong>{totalUnits.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><span>Across active branches</span></article>
-        <article><small>Low stock</small><strong>{lowStockRows.length}</strong><span>{settings.inventory.lowStockAlerts ? "At or below reorder level" : "Alerts disabled in Settings"}</span></article>
-        <article><small>Out of stock</small><strong>{outOfStockRows.length}</strong><span>Requires restocking</span></article>
+        <a className={`catalog-summary-link${!stockFilter ? " active" : ""}`} href="/app/inventory"><small>Stock products</small><strong>{products.filter((product) => product.trackStock).length}</strong><span>View all inventory</span></a>
+        <a className="catalog-summary-link" href="/app/inventory"><small>Total units</small><strong>{totalUnits.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><span>Across active branches</span></a>
+        <a className={`catalog-summary-link${stockFilter === "low" ? " active" : ""}`} href={settings.inventory.lowStockAlerts ? "/app/inventory?stock=low" : "/app/settings#inventory-rules"}><small>Low stock</small><strong>{lowStockRows.length}</strong><span>{settings.inventory.lowStockAlerts ? "Press to view low stock" : "Enable alerts in Settings"}</span></a>
+        <a className={`catalog-summary-link${stockFilter === "out" ? " active" : ""}`} href="/app/inventory?stock=out"><small>Out of stock</small><strong>{outOfStockRows.length}</strong><span>Press to view affected products</span></a>
       </section>
 
       <article className="panel catalog-data-panel">
         <div className="catalog-panel-heading">
-          <div><small>BRANCH BALANCES</small><h3>Inventory register</h3><p>{canEditProducts ? "Click a row to edit its product details; use Adjust stock to change quantity." : "Every row is tenant-scoped and tied to one product and one branch."}</p></div>
-          <span>{inventory.length} allocation{inventory.length === 1 ? "" : "s"}</span>
+          <div><small>BRANCH BALANCES</small><h3>{filterLabel}</h3><p>{canEditProducts ? "Click a row to edit its product details; use Adjust stock to change quantity." : "Every row is tenant-scoped and tied to one product and one branch."}</p></div>
+          <span>{filteredInventory.length} allocation{filteredInventory.length === 1 ? "" : "s"}</span>
         </div>
 
-        {inventory.length === 0 ? (
-          <div className="catalog-empty-state"><span>0</span><h3>No stock allocations yet</h3><p>Create a product with opening stock, or use Adjust stock to allocate an existing product to a branch.</p></div>
+        {stockFilter && (
+          <div className="inventory-filter-bar">
+            <strong>Showing {stockFilter === "out" ? "out-of-stock" : "low-stock"} products only</strong>
+            <a href="/app/inventory">Clear filter</a>
+          </div>
+        )}
+
+        {filteredInventory.length === 0 ? (
+          <div className="catalog-empty-state">
+            <span>0</span>
+            <h3>{stockFilter ? `No ${stockFilter === "out" ? "out-of-stock" : "low-stock"} products` : "No stock allocations yet"}</h3>
+            <p>{stockFilter ? "No inventory records currently match this filter." : "Create a product with opening stock, or use Adjust stock to allocate an existing product to a branch."}</p>
+          </div>
         ) : (
           <div className="catalog-table-wrap">
             <div className="inventory-table inventory-table-head"><span>Product</span><span>Branch</span><span>Available</span><span>Reorder level</span><span>Stock status</span></div>
-            {inventory.map((row) => {
+            {filteredInventory.map((row) => {
               const quantity = Number(row.quantity);
               const reorderLevel = Number(row.reorderLevel);
               const isService = !row.product.trackStock;
