@@ -21,6 +21,8 @@ const userInclude = {
   roles: { include: { role: { include: { rolePermissions: { include: { permission: true } } } } } },
 } satisfies Prisma.UserInclude;
 
+type LoginCandidate = Prisma.UserGetPayload<{ include: typeof userInclude }>;
+
 function phoneCandidates(value: string) {
   const raw = value.trim();
   const compact = raw.replace(/[\s()-]/g, "");
@@ -66,6 +68,33 @@ function isKnownPrismaError(error: unknown): error is Prisma.PrismaClientKnownRe
   return error instanceof Prisma.PrismaClientKnownRequestError;
 }
 
+function mergeCandidates(...groups: LoginCandidate[][]) {
+  const unique = new Map<string, LoginCandidate>();
+  for (const candidate of groups.flat()) unique.set(candidate.id, candidate);
+  return [...unique.values()].sort((left, right) => {
+    const leftLogin = left.lastLoginAt?.getTime() ?? 0;
+    const rightLogin = right.lastLoginAt?.getTime() ?? 0;
+    if (leftLogin !== rightLogin) return rightLogin - leftLogin;
+    return right.createdAt.getTime() - left.createdAt.getTime();
+  });
+}
+
+async function matchingPasswordCandidates(candidates: LoginCandidate[], password: string) {
+  const matches: LoginCandidate[] = [];
+
+  // Password hashes use memory-hard Argon2. Check sequentially so a duplicated legacy
+  // username cannot cause many expensive verifications to run in parallel.
+  for (const candidate of candidates) {
+    try {
+      if (await verifySecret(candidate.passwordHash, password)) matches.push(candidate);
+    } catch (error) {
+      console.error("Password verification failed", { userId: candidate.id, error });
+    }
+  }
+
+  return matches;
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.AUTH_SECRET) {
@@ -78,25 +107,6 @@ export async function POST(req: NextRequest) {
     const ipAddress = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
     const identifierHash = loginAttemptHash(rawIdentifier);
 
-    const candidates = await db.user.findMany({
-      where: {
-        status: "ACTIVE",
-        tenant: { status: { in: [...activeTenantStatuses] } },
-        OR: [
-          { email: normalizedIdentifier },
-          { phone: { in: phoneCandidates(rawIdentifier) } },
-          { staffNumber: { equals: rawIdentifier, mode: "insensitive" } },
-        ],
-      },
-      include: userInclude,
-      orderBy: { createdAt: "asc" },
-      take: 26,
-    });
-
-    const defaultSecurity = normalizeTenantSettings(undefined).securityNotifications;
-    const failedLoginLimit = candidates.length > 0
-      ? Math.min(...candidates.map((candidate) => normalizeTenantSettings(candidate.tenant.settings?.metadata).securityNotifications.failedLoginLimit))
-      : defaultSecurity.failedLoginLimit;
     const recentFailures = await db.loginAttempt.count({
       where: {
         identifierHash,
@@ -104,28 +114,51 @@ export async function POST(req: NextRequest) {
         succeeded: false,
       },
     });
+    const defaultSecurity = normalizeTenantSettings(undefined).securityNotifications;
+    if (recentFailures >= defaultSecurity.failedLoginLimit) {
+      throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
+    }
+
+    const [directCandidates, businessEmailAdminCandidates] = await Promise.all([
+      db.user.findMany({
+        where: {
+          status: "ACTIVE",
+          tenant: { status: { in: [...activeTenantStatuses] } },
+          OR: [
+            { email: { equals: normalizedIdentifier, mode: "insensitive" } },
+            { phone: { in: phoneCandidates(rawIdentifier) } },
+            { staffNumber: { equals: rawIdentifier, mode: "insensitive" } },
+          ],
+        },
+        include: userInclude,
+        orderBy: [{ lastLoginAt: "desc" }, { createdAt: "desc" }],
+      }),
+      db.user.findMany({
+        where: {
+          status: "ACTIVE",
+          tenant: {
+            status: { in: [...activeTenantStatuses] },
+            email: { equals: normalizedIdentifier, mode: "insensitive" },
+          },
+          roles: { some: { role: { code: "TENANT_ADMIN" } } },
+        },
+        include: userInclude,
+        orderBy: { createdAt: "asc" },
+      }),
+    ]);
+
+    const candidates = mergeCandidates(directCandidates, businessEmailAdminCandidates);
+    const failedLoginLimit = candidates.length > 0
+      ? Math.min(
+          defaultSecurity.failedLoginLimit,
+          ...candidates.map((candidate) => normalizeTenantSettings(candidate.tenant.settings?.metadata).securityNotifications.failedLoginLimit),
+        )
+      : defaultSecurity.failedLoginLimit;
     if (recentFailures >= failedLoginLimit) {
       throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
     }
 
-    if (candidates.length > 25) {
-      await recordLoginAttempt({ tenantKey: "ambiguous", identifierHash, ipAddress, succeeded: false });
-      throw new AppError(
-        "AMBIGUOUS_IDENTIFIER",
-        "This username is used by several business accounts. Sign in with your unique email address or phone number.",
-        409,
-      );
-    }
-
-    const checked = await Promise.all(candidates.map(async (candidate) => {
-      try {
-        return { candidate, valid: await verifySecret(candidate.passwordHash, body.password) };
-      } catch (error) {
-        console.error("Password verification failed", { userId: candidate.id, error });
-        return { candidate, valid: false };
-      }
-    }));
-    const matches = checked.filter(({ valid }) => valid).map(({ candidate }) => candidate);
+    const matches = await matchingPasswordCandidates(candidates, body.password);
 
     if (matches.length === 0) {
       await recordLoginAttempt({ tenantKey: "global", identifierHash, ipAddress, succeeded: false });
@@ -142,13 +175,14 @@ export async function POST(req: NextRequest) {
 
     const user = matches[0];
     const security = normalizeTenantSettings(user.tenant.settings?.metadata).securityNotifications;
-    const roleCodes = user.roles.map((userRole) => userRole.role.code);
+    const tenantRoles = user.roles.filter((userRole) => userRole.role.tenantId === user.tenantId);
+    const roleCodes = tenantRoles.map((userRole) => userRole.role.code);
     if (roleCodes.length === 0) {
       throw new AppError("ACCOUNT_NOT_READY", "This account has no role assigned. Ask the administrator or operator to update it.", 409);
     }
 
     const permissions = new Set(
-      user.roles.flatMap((userRole) => userRole.role.rolePermissions.map((rolePermission) => rolePermission.permission.code as Permission)),
+      tenantRoles.flatMap((userRole) => userRole.role.rolePermissions.map((rolePermission) => rolePermission.permission.code as Permission)),
     );
     const requestId = randomUUID();
     const accessToken = await signAccessToken({
