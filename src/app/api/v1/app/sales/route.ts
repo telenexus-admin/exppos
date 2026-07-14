@@ -51,7 +51,11 @@ export async function GET(req: NextRequest) {
         branch: { select: { id: true, code: true, name: true, tenantId: true } },
         cashier: { select: { id: true, fullName: true, staffNumber: true, tenantId: true } },
         customer: { select: { id: true, fullName: true, tenantId: true } },
-        items: true,
+        items: {
+          include: {
+            product: { select: { id: true, name: true, sku: true, tenantId: true } },
+          },
+        },
         payments: { where: { tenantId: ctx.tenantId } },
       },
     });
