@@ -11,7 +11,7 @@ import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 
 const optionalNonNegativeNumber = z.preprocess(
   (value) => value === "" || value === null || value === undefined ? undefined : value,
-  z.coerce.number().finite().min(0, "Reorder level cannot be negative").optional(),
+  z.coerce.number().finite().min(0, "Value cannot be negative").optional(),
 );
 
 const schema = z.object({
@@ -20,6 +20,7 @@ const schema = z.object({
   mode: z.enum(["set", "add", "remove"]),
   quantity: z.coerce.number().finite().min(0, "Quantity cannot be negative"),
   reorderLevel: optionalNonNegativeNumber,
+  sellingPrice: optionalNonNegativeNumber,
   reason: z.string().trim().max(240).optional().default(""),
 });
 
@@ -33,6 +34,8 @@ type AdjustmentResult = {
   quantity: string;
   delta: string;
   reorderLevel: string;
+  previousSellingPrice: string;
+  sellingPrice: string;
   reason: string;
   mode: "set" | "add" | "remove";
 };
@@ -47,6 +50,8 @@ export async function POST(req: NextRequest) {
     requirePermission(ctx, "inventory.adjust");
 
     const body = schema.parse(await req.json());
+    if (body.sellingPrice !== undefined) requirePermission(ctx, "product.update");
+
     const tenantSetting = await db.tenantSetting.findUnique({
       where: { tenantId: ctx.tenantId },
       select: { metadata: true },
@@ -71,7 +76,7 @@ export async function POST(req: NextRequest) {
         }),
         tx.product.findFirst({
           where: { id: body.productId, tenantId: ctx.tenantId, status: "active" },
-          select: { id: true, name: true, trackStock: true },
+          select: { id: true, name: true, trackStock: true, sellingPrice: true },
         }),
       ]);
 
@@ -95,6 +100,10 @@ export async function POST(req: NextRequest) {
       const reorderLevel = body.reorderLevel === undefined
         ? existing?.reorderLevel ?? new Prisma.Decimal(inventorySettings.defaultReorderLevel)
         : new Prisma.Decimal(body.reorderLevel);
+      const previousSellingPrice = product.sellingPrice;
+      const sellingPrice = body.sellingPrice === undefined
+        ? previousSellingPrice
+        : new Prisma.Decimal(body.sellingPrice);
       let nextQuantity: Prisma.Decimal;
 
       if (body.mode === "set") nextQuantity = inputQuantity;
@@ -107,6 +116,13 @@ export async function POST(req: NextRequest) {
           `Cannot remove ${inputQuantity.toString()}. Only ${previousQuantity.toString()} ${product.name} are available at ${branch.name}.`,
           409,
         );
+      }
+
+      if (!sellingPrice.equals(previousSellingPrice)) {
+        await tx.product.update({
+          where: { id: product.id },
+          data: { sellingPrice },
+        });
       }
 
       const delta = nextQuantity.minus(previousQuantity);
@@ -153,6 +169,8 @@ export async function POST(req: NextRequest) {
         quantity: nextQuantity.toString(),
         delta: delta.toString(),
         reorderLevel: reorderLevel.toString(),
+        previousSellingPrice: previousSellingPrice.toString(),
+        sellingPrice: sellingPrice.toString(),
         reason: reason || "Reason not required by business settings",
         mode: body.mode,
       };
@@ -164,11 +182,15 @@ export async function POST(req: NextRequest) {
         entityType: "branch_inventory",
         entityId: result.inventoryId,
         branchId: result.branchId,
-        oldValues: { quantity: result.previousQuantity },
+        oldValues: {
+          quantity: result.previousQuantity,
+          sellingPrice: result.previousSellingPrice,
+        },
         newValues: {
           quantity: result.quantity,
           delta: result.delta,
           reorderLevel: result.reorderLevel,
+          sellingPrice: result.sellingPrice,
           productId: result.productId,
           mode: result.mode,
         },
