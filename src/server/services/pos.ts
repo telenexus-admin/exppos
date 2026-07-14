@@ -10,6 +10,7 @@ type SaleInput = {
   branchId: string;
   shiftId: string;
   customerId?: string;
+  allowOutOfStock?: boolean;
   idempotencyKey: string;
   items: Array<{ productId: string; quantity: string; unitPrice?: string; discount?: string }>;
   payments: Array<{ method: string; amount: string; externalReference?: string }>;
@@ -46,7 +47,7 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
 
     const tenantSetting = await tx.tenantSetting.findUnique({ where: { tenantId: ctx.tenantId } });
     const settings = normalizeTenantSettings(tenantSetting?.metadata);
-    const allowNegativeStock = settings.inventory.allowNegativeStock || ctx.permissions.has("manager.approve");
+    const allowNegativeStock = settings.inventory.allowNegativeStock || input.allowOutOfStock === true;
     const enabledPayments = new Set(settings.payments.enabledMethods);
 
     if (!settings.payments.allowSplitPayments && input.payments.length > 1) {
@@ -265,7 +266,12 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
       entityType: "sale",
       entityId: sale.id,
       branchId: input.branchId,
-      newValues: { saleNumber, total: total.toString(), cashierId: ctx.userId, negativeStockOverride: allowNegativeStock },
+      newValues: {
+        saleNumber,
+        total: total.toString(),
+        cashierId: ctx.userId,
+        outOfStockOverride: input.allowOutOfStock === true,
+      },
     });
 
     return sale;
