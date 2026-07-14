@@ -10,7 +10,6 @@ const schema = z.object({
   branchId: z.string(),
   shiftId: z.string(),
   customerId: z.string().optional(),
-  allowOutOfStock: z.boolean().optional().default(false),
   idempotencyKey: z.string().min(8).max(100),
   items: z.array(z.object({
     productId: z.string(),
