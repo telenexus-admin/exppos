@@ -140,7 +140,7 @@ export function ProductManager({
               <div>
                 <small>NEW CATALOGUE ITEM</small>
                 <h3 id="product-form-title">Add a product</h3>
-                <p>Create the item, set its selling details, and allocate opening stock to a branch.</p>
+                <p>Set the selling price and deliberately select the branch where this product will be stocked and sold.</p>
               </div>
               <button className="catalog-close-button" type="button" onClick={close} aria-label="Close">×</button>
             </div>
@@ -150,9 +150,9 @@ export function ProductManager({
               <label>SKU<div className="catalog-input-action"><input name="sku" required minLength={2} maxLength={60} pattern="[A-Za-z0-9._-]+" value={sku} onChange={(event) => setSku(event.target.value.toUpperCase())} placeholder="WATER-500" /><button type="button" onClick={() => setSku(generateSku(productName))}>Generate</button></div></label>
               <label>Barcode <small>(optional)</small><input name="barcode" maxLength={100} placeholder="Scan or type barcode" /></label>
               <label>Category<select name="categoryId" defaultValue=""><option value="">Uncategorized</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-              <label>Opening branch<select name="branchId" required defaultValue={branches[0]?.id ?? ""}><option value="" disabled>Select branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.code ? ` (${branch.code})` : ""}</option>)}</select></label>
+              <label>Select branch for this product<select name="branchId" required defaultValue=""><option value="" disabled>Select branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.code ? ` (${branch.code})` : ""}</option>)}</select></label>
               <label>Cost price<input name="costPrice" type="number" min="0" step="0.01" defaultValue="0" required /></label>
-              <label>Selling price<input name="sellingPrice" type="number" min="0" step="0.01" required placeholder="0.00" /></label>
+              <label>Product selling price<input name="sellingPrice" type="number" min="0" step="0.01" required placeholder="Enter selling price" /></label>
               <label>Tax rate (%)<input name="taxPercent" type="number" min="0" max="100" step="0.01" defaultValue={defaultTaxPercent} required /></label>
               <label className="catalog-checkbox-label"><input type="checkbox" checked={trackStock} onChange={(event) => setTrackStock(event.target.checked)} /><span><strong>Track stock</strong><small>Turn this off for services or unlimited items.</small></span></label>
               <label>Opening quantity<input name="initialStock" type="number" min="0" step="0.001" defaultValue="0" required disabled={!trackStock} /></label>

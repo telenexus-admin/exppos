@@ -10,6 +10,7 @@ const schema = z.object({
   branchId: z.string(),
   shiftId: z.string(),
   customerId: z.string().optional(),
+  allowOutOfStock: z.boolean().optional().default(false),
   idempotencyKey: z.string().min(8).max(100),
   items: z.array(z.object({
     productId: z.string(),
@@ -51,7 +52,11 @@ export async function GET(req: NextRequest) {
         branch: { select: { id: true, code: true, name: true, tenantId: true } },
         cashier: { select: { id: true, fullName: true, staffNumber: true, tenantId: true } },
         customer: { select: { id: true, fullName: true, tenantId: true } },
-        items: true,
+        items: {
+          include: {
+            product: { select: { id: true, name: true, sku: true, tenantId: true } },
+          },
+        },
         payments: { where: { tenantId: ctx.tenantId } },
       },
     });

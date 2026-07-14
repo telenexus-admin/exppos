@@ -21,6 +21,7 @@ export type PosBehavior = {
   requireReferenceForNonCash: boolean;
   confirmBeforePayment: boolean;
   allowNegativeStock: boolean;
+  canOverrideOutOfStock: boolean;
   taxEnabled: boolean;
   pricesIncludeTax: boolean;
   showTaxBreakdown: boolean;
@@ -96,6 +97,9 @@ export function PosTerminal({
     const product = productMap.get(line.productId);
     return product ? [{ ...line, product }] : [];
   });
+  const usesOutOfStockOverride = lines.some(
+    (line) => line.product.trackStock && line.quantity > (stock[line.product.id] ?? 0),
+  );
   const displayedPriceTotal = lines.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
   const tax = behavior.taxEnabled
     ? lines.reduce((sum, line) => {
@@ -109,6 +113,18 @@ export function PosTerminal({
   const subtotal = behavior.pricesIncludeTax ? displayedPriceTotal - tax : displayedPriceTotal;
   const total = behavior.pricesIncludeTax ? displayedPriceTotal : displayedPriceTotal + tax;
 
+  function confirmOutOfStock(product: PosProduct, requestedQuantity: number) {
+    const available = stock[product.id] ?? 0;
+    if (!product.trackStock || requestedQuantity <= available || behavior.allowNegativeStock) return true;
+    if (!behavior.canOverrideOutOfStock) {
+      setError(`Only ${available} ${product.name} available at ${branchName}.`);
+      return false;
+    }
+    return window.confirm(
+      `${product.name} has only ${available} available at ${branchName}. Sell ${requestedQuantity} anyway and record negative stock?`,
+    );
+  }
+
   function addProduct(product: PosProduct) {
     setError("");
     setSuccess("");
@@ -121,17 +137,13 @@ export function PosTerminal({
       return;
     }
 
-    setCart((current) => {
-      const existing = current.find((line) => line.productId === product.id);
-      const nextQuantity = (existing?.quantity ?? 0) + 1;
-      if (product.trackStock && !behavior.allowNegativeStock && nextQuantity > (stock[product.id] ?? 0)) {
-        setError(`Only ${stock[product.id] ?? 0} ${product.name} available at ${branchName}.`);
-        return current;
-      }
-      return existing
-        ? current.map((line) => line.productId === product.id ? { ...line, quantity: nextQuantity } : line)
-        : [...current, { productId: product.id, quantity: 1 }];
-    });
+    const existing = cart.find((line) => line.productId === product.id);
+    const nextQuantity = (existing?.quantity ?? 0) + 1;
+    if (!confirmOutOfStock(product, nextQuantity)) return;
+
+    setCart((current) => existing
+      ? current.map((line) => line.productId === product.id ? { ...line, quantity: nextQuantity } : line)
+      : [...current, { productId: product.id, quantity: 1 }]);
   }
 
   function setQuantity(productId: string, quantity: number) {
@@ -141,15 +153,16 @@ export function PosTerminal({
       setCart((current) => current.filter((line) => line.productId !== productId));
       return;
     }
-    if (product.trackStock && !behavior.allowNegativeStock && quantity > (stock[productId] ?? 0)) {
-      setError(`Only ${stock[productId] ?? 0} ${product.name} available at ${branchName}.`);
-      return;
-    }
+    if (!confirmOutOfStock(product, quantity)) return;
     setCart((current) => current.map((line) => line.productId === productId ? { ...line, quantity } : line));
   }
 
   async function completeSale() {
     if (!branchId || !shiftId || lines.length === 0 || !canSell) return;
+    if (usesOutOfStockOverride && !behavior.allowNegativeStock && !behavior.canOverrideOutOfStock) {
+      setError("This account cannot complete an out-of-stock sale.");
+      return;
+    }
     if (behavior.requireReferenceForNonCash && paymentMethod !== "Cash" && !paymentReference.trim()) {
       setError(`Enter the ${paymentMethod} transaction reference before completing the sale.`);
       return;
@@ -167,6 +180,7 @@ export function PosTerminal({
         body: JSON.stringify({
           branchId,
           shiftId,
+          allowOutOfStock: usesOutOfStockOverride,
           idempotencyKey: crypto.randomUUID(),
           items: lines.map((line) => ({
             productId: line.product.id,
@@ -218,7 +232,8 @@ export function PosTerminal({
           <span className={shiftId ? "pos-shift-ready" : "pos-shift-required"}>{shiftId ? "Shift open" : "Shift required"}</span>
         </div>
         {!shiftId && <div className="pos-alert"><div><strong>Open a shift to start selling</strong><span>The live inventory is visible below, but checkout is locked until a shift is opened.</span></div><a href="/staff/dashboard">Open shift</a></div>}
-        {behavior.allowNegativeStock && <div className="pos-message pos-warning">Negative stock sales are enabled for this business.</div>}
+        {behavior.canOverrideOutOfStock && !behavior.allowNegativeStock && <div className="pos-message pos-warning">Out-of-stock items can be sold after confirmation. The branch balance will become negative.</div>}
+        {behavior.allowNegativeStock && <div className="pos-message pos-warning">Negative stock sales are enabled in business settings.</div>}
         {error && <p className="pos-message pos-error" role="alert">{error}</p>}
         {success && <p className="pos-message pos-success" role="status">{success}</p>}
 
@@ -229,7 +244,7 @@ export function PosTerminal({
           <div className="product-grid">
             {filteredProducts.map((product) => {
               const available = stock[product.id] ?? 0;
-              const unavailable = product.trackStock && !behavior.allowNegativeStock && available <= 0;
+              const unavailable = product.trackStock && !behavior.allowNegativeStock && !behavior.canOverrideOutOfStock && available <= 0;
               return <button className="product" type="button" onClick={() => addProduct(product)} disabled={unavailable} key={product.id}><span>{product.name.slice(0, 1).toUpperCase()}</span><strong>{product.name}</strong><small>{money(product.price, currency)}</small><em>{product.trackStock ? `${available} in stock` : "Service / unlimited"}</em><i>{product.sku}</i></button>;
             })}
           </div>

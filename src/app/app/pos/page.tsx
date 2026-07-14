@@ -79,11 +79,13 @@ export default async function PosPage() {
   const enabledPaymentMethods = settings.payments.enabledMethods.filter(
     (method) => method !== "Credit" || settings.pos.allowCreditSales,
   );
+  const canOverrideOutOfStock = session.permissions.has("sale.create");
   const behavior: PosBehavior = {
     enabledPaymentMethods: enabledPaymentMethods.length > 0 ? enabledPaymentMethods : ["Cash"],
     requireReferenceForNonCash: settings.payments.requireReferenceForNonCash,
     confirmBeforePayment: settings.pos.confirmBeforePayment,
     allowNegativeStock: settings.inventory.allowNegativeStock,
+    canOverrideOutOfStock,
     taxEnabled: settings.taxReceipt.taxEnabled,
     pricesIncludeTax: settings.taxReceipt.pricesIncludeTax,
     showTaxBreakdown: settings.taxReceipt.showTaxBreakdown,

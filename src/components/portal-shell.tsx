@@ -32,12 +32,12 @@ type NavigationItem = {
 
 const tenantSections: NavigationItem[] = [
   { label: "Dashboard", slug: "dashboard", href: "/app/dashboard", icon: "dashboard" },
-  { label: "POS Checkout", slug: "pos", href: "/app/pos", icon: "cart" },
+  { label: "Point of Sale", slug: "pos", href: "/app/pos", icon: "cart" },
+  { label: "Products", slug: "products", href: "/app/products", icon: "products" },
+  { label: "Inventory", slug: "inventory", href: "/app/inventory", icon: "inventory" },
   { label: "Branches", slug: "branches", href: "/app/branches", icon: "branches" },
   { label: "Staff", slug: "staff", href: "/app/staff", icon: "staff" },
   { label: "Customers", slug: "customers", href: "/app/customers", icon: "customers" },
-  { label: "Products", slug: "products", href: "/app/products", icon: "products" },
-  { label: "Inventory", slug: "inventory", href: "/app/inventory", icon: "inventory" },
   { label: "Purchases", slug: "purchases", href: "/app/purchases", icon: "purchases" },
   { label: "Sales", slug: "sales", href: "/app/sales", icon: "sales" },
   { label: "Invoices", slug: "invoices", href: "/app/invoices", icon: "invoices" },
@@ -50,7 +50,7 @@ const tenantSections: NavigationItem[] = [
 
 const staffSections: NavigationItem[] = [
   { label: "My Dashboard", slug: "dashboard", href: "/staff/dashboard", icon: "dashboard" },
-  { label: "POS Checkout", slug: "pos", href: "/app/pos", icon: "cart" },
+  { label: "Point of Sale", slug: "pos", href: "/app/pos", icon: "cart" },
 ];
 
 function PortalIcon({ name }: { name: IconName }) {
@@ -77,7 +77,7 @@ function PortalIcon({ name }: { name: IconName }) {
     reports: <><path d="M4 19V9" /><path d="M10 19V5" /><path d="M16 19v-7" /><path d="M22 19V3" /><path d="M2 21h22" /></>,
     tasks: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="m8 9 2 2 4-4" /><path d="M8 15h8" /></>,
     audit: <><path d="M12 22a10 10 0 1 0-10-10" /><path d="M2 4v6h6" /><path d="M12 6v6l4 2" /></>,
-    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.36.24.72.6.6 1v4c.12.4-.24.76-.6 1Z" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06-.06A1.7 1.7 0 0 0 19.4 9c.36.24.72.6.6 1v4c.12.4-.24.76-.6 1Z" /></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     menu: <><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></>,
     close: <><path d="M5 5l14 14" /><path d="M19 5 5 19" /></>,
