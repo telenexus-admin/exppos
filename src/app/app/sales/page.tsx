@@ -51,11 +51,16 @@ export default async function SalesPage() {
         branch: { select: { id: true, code: true, name: true, tenantId: true } },
         cashier: { select: { id: true, fullName: true, staffNumber: true, tenantId: true } },
         customer: { select: { id: true, fullName: true, tenantId: true } },
+        items: {
+          select: {
+            quantity: true,
+            product: { select: { id: true, name: true, sku: true, tenantId: true } },
+          },
+        },
         payments: {
           where: { tenantId: session.tenantId },
           select: { method: true, amount: true, status: true, externalReference: true },
         },
-        _count: { select: { items: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 200,
@@ -78,7 +83,7 @@ export default async function SalesPage() {
         <div>
           <small>TENANT SALES REGISTER</small>
           <h3>Completed staff POS sales</h3>
-          <p>Only sales belonging to {tenant.name} and the branches this account can access are shown here.</p>
+          <p>Every sale shows the exact products and quantities sold, limited to {tenant.name} and the branches this account can access.</p>
         </div>
         <LiveDataRefresh />
       </section>
@@ -105,13 +110,17 @@ export default async function SalesPage() {
         ) : (
           <div className="sales-table-wrap">
             <div className="sales-table-row sales-table-head">
-              <span>Sale</span><span>Branch</span><span>Cashier</span><span>Customer</span><span>Payment</span><span>Total</span><span>Status</span><span>Time</span>
+              <span>Sale / products</span><span>Branch</span><span>Cashier</span><span>Customer</span><span>Payment</span><span>Total</span><span>Status</span><span>Time</span>
             </div>
             {sales.map((sale) => {
               const paymentMethods = sale.payments.map((payment) => payment.method).join(", ") || "No payment";
+              const productNames = sale.items
+                .filter((item) => item.product.tenantId === session.tenantId)
+                .map((item) => `${item.product.name} × ${Number(item.quantity).toLocaleString("en-KE", { maximumFractionDigits: 3 })}`)
+                .join(", ");
               return (
                 <div className="sales-table-row" key={sale.id}>
-                  <div><strong>{sale.saleNumber}</strong><small>{sale._count.items} item{sale._count.items === 1 ? "" : "s"}</small></div>
+                  <div><strong>{sale.saleNumber}</strong><small title={productNames}>{productNames || "No product details"}</small></div>
                   <div><strong>{sale.branch.name}</strong><small>{sale.branch.code}</small></div>
                   <div><strong>{sale.cashier.fullName}</strong><small>@{sale.cashier.staffNumber}</small></div>
                   <div><strong>{sale.customer?.fullName ?? "Walk-in customer"}</strong><small>{sale.customer ? "Customer account" : "No customer selected"}</small></div>
