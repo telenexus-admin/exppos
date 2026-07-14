@@ -10,7 +10,6 @@ type SaleInput = {
   branchId: string;
   shiftId: string;
   customerId?: string;
-  allowOutOfStock?: boolean;
   idempotencyKey: string;
   items: Array<{ productId: string; quantity: string; unitPrice?: string; discount?: string }>;
   payments: Array<{ method: string; amount: string; externalReference?: string }>;
@@ -47,7 +46,6 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
 
     const tenantSetting = await tx.tenantSetting.findUnique({ where: { tenantId: ctx.tenantId } });
     const settings = normalizeTenantSettings(tenantSetting?.metadata);
-    const allowNegativeStock = settings.inventory.allowNegativeStock || input.allowOutOfStock === true;
     const enabledPayments = new Set(settings.payments.enabledMethods);
 
     if (!settings.payments.allowSplitPayments && input.payments.length > 1) {
@@ -142,37 +140,21 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
       }
 
       if (product.trackStock) {
-        if (allowNegativeStock) {
-          await tx.branchInventory.upsert({
-            where: {
-              tenantId_branchId_productId: {
-                tenantId: ctx.tenantId,
-                branchId: input.branchId,
-                productId: product.id,
-              },
-            },
-            update: { quantity: { decrement: quantity } },
-            create: {
-              tenantId: ctx.tenantId,
-              branchId: input.branchId,
-              productId: product.id,
-              quantity: quantity.negated(),
-              reorderLevel: new Prisma.Decimal(settings.inventory.defaultReorderLevel),
-            },
-          });
-        } else {
-          const updated = await tx.branchInventory.updateMany({
-            where: {
-              tenantId: ctx.tenantId,
-              branchId: input.branchId,
-              productId: product.id,
-              quantity: { gte: quantity },
-            },
-            data: { quantity: { decrement: quantity } },
-          });
-          if (updated.count !== 1) {
-            throw new AppError("INSUFFICIENT_STOCK", `Insufficient stock for ${product.name}`, 409);
-          }
+        const updated = await tx.branchInventory.updateMany({
+          where: {
+            tenantId: ctx.tenantId,
+            branchId: input.branchId,
+            productId: product.id,
+            quantity: { gte: quantity },
+          },
+          data: { quantity: { decrement: quantity } },
+        });
+        if (updated.count !== 1) {
+          throw new AppError(
+            "INSUFFICIENT_STOCK",
+            `${product.name} is out of stock or has insufficient quantity at this branch`,
+            409,
+          );
         }
       }
 
@@ -270,7 +252,6 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
         saleNumber,
         total: total.toString(),
         cashierId: ctx.userId,
-        outOfStockOverride: input.allowOutOfStock === true,
       },
     });
 
