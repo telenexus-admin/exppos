@@ -21,6 +21,7 @@ export type PosBehavior = {
   requireReferenceForNonCash: boolean;
   confirmBeforePayment: boolean;
   allowNegativeStock: boolean;
+  canOverrideOutOfStock: boolean;
   taxEnabled: boolean;
   pricesIncludeTax: boolean;
   showTaxBreakdown: boolean;
@@ -121,11 +122,19 @@ export function PosTerminal({
       return;
     }
 
+    const available = stock[product.id] ?? 0;
+    if (product.trackStock && available <= 0 && behavior.canOverrideOutOfStock) {
+      const confirmed = window.confirm(
+        `${product.name} is out of stock at ${branchName}. Sell it anyway and record negative stock?`,
+      );
+      if (!confirmed) return;
+    }
+
     setCart((current) => {
       const existing = current.find((line) => line.productId === product.id);
       const nextQuantity = (existing?.quantity ?? 0) + 1;
-      if (product.trackStock && !behavior.allowNegativeStock && nextQuantity > (stock[product.id] ?? 0)) {
-        setError(`Only ${stock[product.id] ?? 0} ${product.name} available at ${branchName}.`);
+      if (product.trackStock && !behavior.allowNegativeStock && nextQuantity > available) {
+        setError(`Only ${available} ${product.name} available at ${branchName}.`);
         return current;
       }
       return existing
@@ -218,7 +227,7 @@ export function PosTerminal({
           <span className={shiftId ? "pos-shift-ready" : "pos-shift-required"}>{shiftId ? "Shift open" : "Shift required"}</span>
         </div>
         {!shiftId && <div className="pos-alert"><div><strong>Open a shift to start selling</strong><span>The live inventory is visible below, but checkout is locked until a shift is opened.</span></div><a href="/staff/dashboard">Open shift</a></div>}
-        {behavior.allowNegativeStock && <div className="pos-message pos-warning">Negative stock sales are enabled for this business.</div>}
+        {behavior.allowNegativeStock && <div className="pos-message pos-warning">Authorized out-of-stock sales are enabled. Negative branch balances will be recorded.</div>}
         {error && <p className="pos-message pos-error" role="alert">{error}</p>}
         {success && <p className="pos-message pos-success" role="status">{success}</p>}
 
