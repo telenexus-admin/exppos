@@ -46,6 +46,7 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
 
     const tenantSetting = await tx.tenantSetting.findUnique({ where: { tenantId: ctx.tenantId } });
     const settings = normalizeTenantSettings(tenantSetting?.metadata);
+    const allowNegativeStock = settings.inventory.allowNegativeStock || ctx.permissions.has("manager.approve");
     const enabledPayments = new Set(settings.payments.enabledMethods);
 
     if (!settings.payments.allowSplitPayments && input.payments.length > 1) {
@@ -140,7 +141,7 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
       }
 
       if (product.trackStock) {
-        if (settings.inventory.allowNegativeStock) {
+        if (allowNegativeStock) {
           await tx.branchInventory.upsert({
             where: {
               tenantId_branchId_productId: {
@@ -264,7 +265,7 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
       entityType: "sale",
       entityId: sale.id,
       branchId: input.branchId,
-      newValues: { saleNumber, total: total.toString(), cashierId: ctx.userId },
+      newValues: { saleNumber, total: total.toString(), cashierId: ctx.userId, negativeStockOverride: allowNegativeStock },
     });
 
     return sale;
