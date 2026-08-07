@@ -4,84 +4,40 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { appendAudit } from "@/server/audit/audit";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { apiError, tenantContext } from "@/server/http";
 import { hashSecret } from "@/server/security/passwords";
-import { requirePermission } from "@/server/security/context";
+import { requirePermission, type Permission } from "@/server/security/context";
 import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 
 const roleTemplates = {
   CASHIER: {
     name: "Cashier",
     permissions: [
-      "customer.view",
-      "customer.create",
-      "product.view",
-      "inventory.view",
-      "sale.create",
-      "sale.view",
-      "sale.discount",
-      "shift.open",
-      "shift.close",
-      "payment.receive",
+      "customer.view", "customer.create", "product.view", "inventory.view", "sale.create", "sale.view",
+      "sale.discount", "shift.open", "shift.close", "payment.receive",
     ],
   },
   BRANCH_MANAGER: {
     name: "Branch Manager",
     permissions: [
-      "branch.view",
-      "staff.view",
-      "staff.update",
-      "customer.view",
-      "customer.create",
-      "customer.update",
-      "customer.archive",
-      "product.view",
-      "product.create",
-      "product.update",
-      "inventory.view",
-      "inventory.adjust",
-      "inventory.transfer",
-      "sale.create",
-      "sale.view",
-      "sale.discount",
-      "sale.override_price",
-      "sale.void",
-      "sale.refund",
-      "shift.open",
-      "shift.close",
-      "shift.review",
-      "payment.receive",
-      "purchase.create",
-      "purchase.approve",
-      "expense.manage",
-      "report.view",
-      "manager.approve",
+      "branch.view", "staff.view", "staff.update", "customer.view", "customer.create", "customer.update",
+      "customer.archive", "product.view", "product.create", "product.update", "inventory.view", "inventory.adjust",
+      "inventory.transfer", "sale.create", "sale.view", "sale.discount", "sale.override_price", "sale.void",
+      "sale.refund", "shift.open", "shift.close", "shift.review", "payment.receive", "purchase.create",
+      "purchase.approve", "expense.manage", "report.view", "manager.approve",
     ],
   },
   INVENTORY_CLERK: {
     name: "Inventory Clerk",
     permissions: [
-      "branch.view",
-      "product.view",
-      "product.create",
-      "product.update",
-      "inventory.view",
-      "inventory.adjust",
-      "inventory.transfer",
-      "purchase.create",
-      "report.view",
+      "branch.view", "product.view", "product.create", "product.update", "inventory.view", "inventory.adjust",
+      "inventory.transfer", "purchase.create", "report.view",
     ],
   },
   ACCOUNTANT: {
     name: "Accountant",
-    permissions: [
-      "customer.view",
-      "sale.view",
-      "payment.receive",
-      "report.view",
-      "report.financial",
-      "accounting.manage",
-    ],
+    permissions: ["customer.view", "sale.view", "payment.receive", "report.view", "report.financial", "accounting.manage"],
   },
 } as const;
 
@@ -89,19 +45,12 @@ type RoleCode = keyof typeof roleTemplates;
 
 const schema = z.object({
   fullName: z.string().trim().min(2, "Enter the staff member's full name").max(120),
-  username: z
-    .string()
-    .trim()
-    .min(3, "Username must have at least 3 characters")
-    .max(32)
+  username: z.string().trim().min(3, "Username must have at least 3 characters").max(32)
     .regex(/^[a-zA-Z0-9._-]+$/, "Use only letters, numbers, dots, underscores, or hyphens")
     .transform((value) => value.toLowerCase()),
   email: z.union([z.string().trim().email("Enter a valid email address"), z.literal("")]).optional(),
   phone: z.string().trim().max(30).optional(),
-  password: z
-    .string()
-    .min(12, "Password must have at least 12 characters")
-    .max(128)
+  password: z.string().min(12, "Password must have at least 12 characters").max(128)
     .regex(/[a-z]/, "Password must contain a lowercase letter")
     .regex(/[A-Z]/, "Password must contain an uppercase letter")
     .regex(/\d/, "Password must contain a number"),
@@ -132,8 +81,19 @@ export async function POST(req: NextRequest) {
     requirePermission(ctx, "staff.assign_role");
 
     const body = schema.parse(await req.json());
+    const scope = await resolveTenantAccessScope(db, ctx);
+    if (!scope.branchIds.includes(body.branchId)) {
+      throw new AppError("BRANCH_FORBIDDEN", "You cannot create staff for this branch", 403);
+    }
+
     const passwordHash = await hashSecret(body.password);
     const template = roleTemplates[body.roleCode as RoleCode];
+    if (!scope.isTenantAdmin) {
+      const missingPermissions = template.permissions.filter((permission) => !ctx.permissions.has(permission as Permission));
+      if (missingPermissions.length > 0) {
+        throw new AppError("ROLE_FORBIDDEN", "You cannot assign a staff role with permissions outside your own access", 403);
+      }
+    }
 
     let result: StaffResult | undefined;
 
@@ -144,7 +104,6 @@ export async function POST(req: NextRequest) {
             where: { id: ctx.tenantId },
             include: { subscription: { include: { plan: true } }, settings: true },
           });
-
           if (!tenant) throw new AppError("NOT_FOUND", "Business account was not found", 404);
 
           const currentUsers = await tx.user.count({ where: { tenantId: ctx.tenantId } });
@@ -165,50 +124,23 @@ export async function POST(req: NextRequest) {
 
           const suppliedEmail = body.email?.trim().toLowerCase();
           const loginEmail = suppliedEmail || `${body.username}@${tenant.slug}.staff.local`;
-
           const conflict = await tx.user.findFirst({
-            where: {
-              tenantId: ctx.tenantId,
-              OR: [{ staffNumber: body.username }, { email: loginEmail }],
-            },
+            where: { tenantId: ctx.tenantId, OR: [{ staffNumber: body.username }, { email: loginEmail }] },
             select: { staffNumber: true, email: true },
           });
-
-          if (conflict?.staffNumber === body.username) {
-            throw new AppError("USERNAME_TAKEN", "That username is already in use", 409);
-          }
-          if (conflict?.email === loginEmail) {
-            throw new AppError("EMAIL_TAKEN", "That email address is already in use", 409);
-          }
+          if (conflict?.staffNumber === body.username) throw new AppError("USERNAME_TAKEN", "That username is already in use", 409);
+          if (conflict?.email === loginEmail) throw new AppError("EMAIL_TAKEN", "That email address is already in use", 409);
 
           const role = await tx.role.upsert({
-            where: {
-              tenantId_code: {
-                tenantId: ctx.tenantId,
-                code: body.roleCode,
-              },
-            },
-            update: {
-              name: template.name,
-              isSystem: true,
-            },
-            create: {
-              tenantId: ctx.tenantId,
-              code: body.roleCode,
-              name: template.name,
-              isSystem: true,
-            },
+            where: { tenantId_code: { tenantId: ctx.tenantId, code: body.roleCode } },
+            update: { name: template.name, isSystem: true },
+            create: { tenantId: ctx.tenantId, code: body.roleCode, name: template.name, isSystem: true },
           });
 
           const permissions = await tx.permission.findMany({
-            where: {
-              tenantId: ctx.tenantId,
-              code: { in: [...template.permissions] },
-              platformOnly: false,
-            },
+            where: { tenantId: ctx.tenantId, code: { in: [...template.permissions] }, platformOnly: false },
             select: { id: true },
           });
-
           if (permissions.length > 0) {
             await tx.rolePermission.createMany({
               data: permissions.map(({ id }) => ({ roleId: role.id, permissionId: id })),
@@ -216,10 +148,7 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          const forcePasswordChange = normalizeTenantSettings(
-            tenant.settings?.metadata,
-          ).securityNotifications.forcePasswordChange;
-
+          const forcePasswordChange = normalizeTenantSettings(tenant.settings?.metadata).securityNotifications.forcePasswordChange;
           const user = await tx.user.create({
             data: {
               tenantId: ctx.tenantId,
@@ -232,7 +161,6 @@ export async function POST(req: NextRequest) {
               forcePasswordChange,
             },
           });
-
           await tx.userRole.create({ data: { userId: user.id, roleId: role.id } });
           await tx.userBranchAssignment.create({ data: { userId: user.id, branchId: branch.id } });
 
@@ -247,24 +175,15 @@ export async function POST(req: NextRequest) {
             branchId: branch.id,
             businessCode: tenant.code,
           };
-        }, {
-          isolationLevel: "Serializable",
-          maxWait: 10_000,
-          timeout: 20_000,
-        });
-
+        }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 20_000 });
         break;
       } catch (error) {
-        if (isKnownPrismaError(error) && error.code === "P2034" && attempt < 3) {
-          continue;
-        }
+        if (isKnownPrismaError(error) && error.code === "P2034" && attempt < 3) continue;
         throw error;
       }
     }
 
-    if (!result) {
-      throw new AppError("STAFF_CREATE_FAILED", "The staff account could not be created. Please try again.", 503);
-    }
+    if (!result) throw new AppError("STAFF_CREATE_FAILED", "The staff account could not be created. Please try again.", 503);
 
     try {
       await appendAudit(db, ctx, {
@@ -283,11 +202,7 @@ export async function POST(req: NextRequest) {
         deviceInfo: req.headers.get("user-agent") ?? undefined,
       });
     } catch (auditError) {
-      console.error("Staff account created but audit logging failed", {
-        requestId: ctx.requestId,
-        staffId: result.id,
-        auditError,
-      });
+      console.error("Staff account created but audit logging failed", { requestId: ctx.requestId, staffId: result.id, auditError });
     }
 
     return NextResponse.json({
@@ -304,23 +219,11 @@ export async function POST(req: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     if (isKnownPrismaError(error)) {
-      if (error.code === "P2002") {
-        return apiError(new AppError("DUPLICATE_STAFF", "The username or email is already in use", 409));
-      }
-
-      if (error.code === "P2028") {
-        return apiError(new AppError("DATABASE_TIMEOUT", "The database took too long to create the account. Please try again.", 503));
-      }
-
-      if (error.code === "P2003") {
-        return apiError(new AppError("INVALID_ASSIGNMENT", "The selected branch or role is no longer available", 409));
-      }
-
-      if (error.code === "P2034") {
-        return apiError(new AppError("DATABASE_BUSY", "The account could not be created because another update happened at the same time. Please try again.", 409));
-      }
+      if (error.code === "P2002") return apiError(new AppError("DUPLICATE_STAFF", "The username or email is already in use", 409));
+      if (error.code === "P2028") return apiError(new AppError("DATABASE_TIMEOUT", "The database took too long to create the account. Please try again.", 503));
+      if (error.code === "P2003") return apiError(new AppError("INVALID_ASSIGNMENT", "The selected branch or role is no longer available", 409));
+      if (error.code === "P2034") return apiError(new AppError("DATABASE_BUSY", "The account could not be created because another update happened at the same time. Please try again.", 409));
     }
-
     return apiError(error);
   }
 }

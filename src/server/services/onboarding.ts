@@ -1,17 +1,33 @@
 import type { PrismaClient } from "@prisma/client";
+import type { DashboardSection } from "@/lib/dashboard-access";
 import { hashSecret } from "@/server/security/passwords";
 import { appendAudit } from "@/server/audit/audit";
 import type { OperatorContext } from "@/server/security/context";
+import { provisionDashboardAccount, type DashboardAccountType } from "@/server/services/dashboard-accounts";
 
 export type OnboardTenantInput = {
   code: string; slug: string; name: string; legalName?: string; email: string; phone: string;
   currency: string; timezone: string; receiptName: string; planId: string; status: "TRIAL" | "ACTIVE";
   trialEndsAt?: Date; branch: { code: string; name: string; email?: string; phone?: string; address?: string };
   admin: { fullName: string; email: string; phone?: string; temporaryPassword: string; pin: string };
+  additionalAccount?: {
+    accountType: DashboardAccountType;
+    fullName: string;
+    username: string;
+    email?: string;
+    phone?: string;
+    temporaryPassword: string;
+    sections?: DashboardSection[];
+  };
 };
 
 export async function onboardTenant(db: PrismaClient, ctx: OperatorContext, input: OnboardTenantInput) {
-  const [passwordHash, pinHash] = await Promise.all([hashSecret(input.admin.temporaryPassword), hashSecret(input.admin.pin)]);
+  const [passwordHash, pinHash, additionalPasswordHash] = await Promise.all([
+    hashSecret(input.admin.temporaryPassword),
+    hashSecret(input.admin.pin),
+    input.additionalAccount ? hashSecret(input.additionalAccount.temporaryPassword) : Promise.resolve(null),
+  ]);
+
   return db.$transaction(async (tx) => {
     const plan = await tx.subscriptionPlan.findFirstOrThrow({ where: { id: input.planId, active: true } });
     const tenant = await tx.tenant.create({ data: {
@@ -29,12 +45,32 @@ export async function onboardTenant(db: PrismaClient, ctx: OperatorContext, inpu
     const admin = await tx.user.create({ data: { tenantId: tenant.id, staffNumber: "STAFF-000001", fullName: input.admin.fullName, email: input.admin.email.toLowerCase(), phone: input.admin.phone, passwordHash, pinHash, forcePasswordChange: true } });
     await tx.userRole.create({ data: { userId: admin.id, roleId: role.id } });
     await tx.userBranchAssignment.create({ data: { userId: admin.id, branchId: branch.id } });
+
+    let additionalAccountId: string | null = null;
+    if (input.additionalAccount && additionalPasswordHash) {
+      if (plan.maxUsers < 2) throw new Error("The selected plan does not allow an additional dashboard account");
+      const extra = await provisionDashboardAccount(tx, {
+        tenantId: tenant.id,
+        tenantSlug: tenant.slug,
+        accountType: input.additionalAccount.accountType,
+        fullName: input.additionalAccount.fullName,
+        username: input.additionalAccount.username,
+        email: input.additionalAccount.email,
+        phone: input.additionalAccount.phone,
+        passwordHash: additionalPasswordHash,
+        branchIds: [branch.id],
+        sections: input.additionalAccount.sections,
+        forcePasswordChange: true,
+      });
+      additionalAccountId = extra.user.id;
+    }
+
     await tx.category.createMany({ data: ["General", "Services"].map((name) => ({ tenantId: tenant.id, name })) });
     await tx.numberSequence.createMany({ data: [
       { tenantId: tenant.id, key: "sale", prefix: "SALE" }, { tenantId: tenant.id, key: "invoice", prefix: "INV" },
       { tenantId: tenant.id, key: "purchase", prefix: "PO" }, { tenantId: tenant.id, key: "customer", prefix: "CUST" },
     ] });
-    await appendAudit(tx, ctx, { action: "tenant.created", entityType: "tenant", entityId: tenant.id, newValues: { name: tenant.name, slug: tenant.slug, adminId: admin.id, branchId: branch.id } });
-    return { tenant, branch, admin: { id: admin.id, email: admin.email }, limits: { branches: plan.maxBranches, users: plan.maxUsers, products: plan.maxProducts } };
+    await appendAudit(tx, ctx, { action: "tenant.created", entityType: "tenant", entityId: tenant.id, newValues: { name: tenant.name, slug: tenant.slug, adminId: admin.id, branchId: branch.id, additionalAccountId } });
+    return { tenant, branch, admin: { id: admin.id, email: admin.email }, additionalAccountId, limits: { branches: plan.maxBranches, users: plan.maxUsers, products: plan.maxProducts } };
   }, { isolationLevel: "Serializable" });
 }

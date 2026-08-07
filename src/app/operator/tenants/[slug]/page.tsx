@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
+import { DASHBOARD_MANAGER_ROLE_PREFIX, dashboardSectionsFromPermissions } from "@/lib/dashboard-access";
 import { DeleteTenantButton } from "@/components/delete-tenant-button";
 import { OperatorActionButton } from "@/components/operator-action-button";
 import { OperatorShell } from "@/components/operator-shell";
 import { ResetTenantAdminPassword } from "@/components/reset-tenant-admin-password";
 import { db } from "@/lib/db";
+import { OperatorAccessAccountForm } from "./access-account-form";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +23,23 @@ export default async function TenantDetails({
     where: { slug, status: { not: "CANCELLED" } },
     include: {
       subscription: { include: { plan: true } },
+      branches: {
+        where: { status: "ACTIVE" },
+        select: { id: true, name: true, code: true },
+        orderBy: [{ isHeadOffice: "desc" }, { name: "asc" }],
+      },
       users: {
         where: {
-          roles: { some: { role: { code: "TENANT_ADMIN" } } },
+          roles: {
+            some: {
+              role: {
+                OR: [
+                  { code: "TENANT_ADMIN" },
+                  { code: { startsWith: DASHBOARD_MANAGER_ROLE_PREFIX } },
+                ],
+              },
+            },
+          },
         },
         select: {
           id: true,
@@ -34,9 +50,20 @@ export default async function TenantDetails({
           status: true,
           lastLoginAt: true,
           createdAt: true,
+          roles: {
+            select: {
+              role: {
+                select: {
+                  code: true,
+                  name: true,
+                  rolePermissions: { select: { permission: { select: { code: true } } } },
+                },
+              },
+            },
+          },
+          branches: { select: { branch: { select: { id: true, name: true, code: true } } } },
         },
         orderBy: { createdAt: "asc" },
-        take: 1,
       },
       _count: { select: { branches: true, users: true, sales: true } },
     },
@@ -44,8 +71,9 @@ export default async function TenantDetails({
 
   if (!tenant) notFound();
 
-  const admin = tenant.users[0] ?? null;
+  const admin = tenant.users.find((user) => user.roles.some(({ role }) => role.code === "TENANT_ADMIN")) ?? null;
   const status = tenant.status.replaceAll("_", " ");
+  const maxUsers = tenant.subscription?.plan.maxUsers ?? 1;
 
   return (
     <OperatorShell title={tenant.name} current="tenants">
@@ -75,7 +103,7 @@ export default async function TenantDetails({
         {[
           ["Plan", tenant.subscription?.plan.name ?? "No plan", tenant.subscription?.expiresAt ? `Expires ${tenant.subscription.expiresAt.toLocaleDateString("en-KE")}` : "No expiry"],
           ["Branches", String(tenant._count.branches), "Plan usage"],
-          ["Staff users", String(tenant._count.users), "Created accounts"],
+          ["Users", `${tenant._count.users} / ${maxUsers}`, "Created accounts"],
           ["Transactions", String(tenant._count.sales), "All time"],
         ].map(([label, value, note]) => (
           <article key={label}><small>{label}</small><strong>{value}</strong><span>{note}</span></article>
@@ -85,13 +113,8 @@ export default async function TenantDetails({
       <div className="operator-grid">
         <article className="operator-card wide operator-login-credentials-card">
           <div className="operator-card-head">
-            <div><small>ADMIN LOGIN</small><h2>First administrator credentials</h2></div>
-            <a
-              className="manage-link"
-              href={`/api/v1/operator/tenants/${tenant.id}/open-login`}
-              target="_blank"
-              rel="noreferrer"
-            >
+            <div><small>ADMIN LOGIN</small><h2>Primary administrator credentials</h2></div>
+            <a className="manage-link" href={`/api/v1/operator/tenants/${tenant.id}/open-login`} target="_blank" rel="noreferrer">
               Open isolated client login →
             </a>
           </div>
@@ -105,12 +128,10 @@ export default async function TenantDetails({
                 <div><dt>Account status</dt><dd>{admin.status.toLowerCase()}</dd></div>
               </dl>
               <div className="operator-login-instructions">
-                <strong>How the administrator should sign in</strong>
-                <span>First field: use {admin.staffNumber}, {admin.email}, or {admin.phone ?? "the administrator phone number"}.</span>
-                <span>Second field: use the temporary password entered during onboarding.</span>
-                <small>
-                  A business code or slug is no longer required. Open isolated client login still clears the previous tenant session before this client signs in.
-                </small>
+                <strong>How administrators and dashboard managers sign in</strong>
+                <span>Use the normal client login page with username, email, or phone plus the password issued for that account.</span>
+                <span>Additional administrators get the same full dashboard. Restricted branch managers get only their assigned branches and selected tabs.</span>
+                <small>Open isolated client login still clears the previous tenant session before this client signs in.</small>
               </div>
             </>
           ) : (
@@ -119,6 +140,48 @@ export default async function TenantDetails({
               <span>This client needs an administrator account before the admin dashboard can be accessed.</span>
             </div>
           )}
+        </article>
+
+        <article className="operator-card wide">
+          <div className="operator-card-head">
+            <div><small>DASHBOARD ACCESS</small><h2>Administrators & branch managers</h2></div>
+            <span className="staff-count-badge">{tenant.users.length} dashboard account{tenant.users.length === 1 ? "" : "s"}</span>
+          </div>
+          <p>These accounts use the business dashboard. Full administrators see the whole tenant; branch managers are limited to the branches and tabs assigned by the operator.</p>
+
+          <div className="operator-access-users">
+            {tenant.users.map((user) => {
+              const roles = user.roles.map(({ role }) => role);
+              const isAdministrator = roles.some((role) => role.code === "TENANT_ADMIN");
+              const managerRole = roles.find((role) => role.code.startsWith(DASHBOARD_MANAGER_ROLE_PREFIX));
+              const permissionCodes = managerRole?.rolePermissions.map(({ permission }) => permission.code) ?? [];
+              const sections = dashboardSectionsFromPermissions(permissionCodes);
+              const branchNames = user.branches.map(({ branch }) => branch.name);
+              const hiddenEmail = user.email.endsWith(".dashboard.local");
+
+              return (
+                <div className="activity-item operator-access-user" key={user.id}>
+                  <i />
+                  <div>
+                    <strong>{user.fullName}</strong>
+                    <small>{isAdministrator ? "Administrator · Full dashboard" : "Branch Manager"}</small>
+                    <span>Username: {user.staffNumber}{hiddenEmail ? "" : ` · ${user.email}`}</span>
+                    <span>Branches: {isAdministrator ? "All active branches" : branchNames.join(", ") || "No branch assigned"}</span>
+                    {!isAdministrator && <span>Tabs: {sections.map((section) => section.replaceAll("-", " ")).join(", ") || "Dashboard only"}</span>}
+                    <span>Status: {user.status.toLowerCase()} · {user.lastLoginAt ? `Last login ${user.lastLoginAt.toLocaleString("en-KE")}` : "Never logged in"}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <OperatorAccessAccountForm
+            tenantId={tenant.id}
+            tenantName={tenant.name}
+            branches={tenant.branches}
+            currentUsers={tenant._count.users}
+            maxUsers={maxUsers}
+          />
         </article>
 
         <article className="operator-card wide">

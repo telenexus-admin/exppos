@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { appendAudit } from "@/server/audit/audit";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { apiError, tenantContext } from "@/server/http";
 import { requirePermission } from "@/server/security/context";
 
@@ -52,6 +53,10 @@ export async function POST(req: NextRequest) {
     requirePermission(ctx, "product.create");
 
     const body = schema.parse(await req.json());
+    const scope = await resolveTenantAccessScope(db, ctx);
+    if (!scope.branchIds.includes(body.branchId)) {
+      throw new AppError("BRANCH_FORBIDDEN", "You cannot create inventory for this branch", 403);
+    }
     const barcode = body.barcode?.trim() || null;
     const imageData = body.imageData || null;
     const categoryId = body.categoryId?.trim() || null;
