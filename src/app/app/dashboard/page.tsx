@@ -67,10 +67,7 @@ export default async function Dashboard() {
       include: {
         branch: { select: { id: true, name: true, code: true } },
         cashier: { select: { id: true, fullName: true, staffNumber: true } },
-        payments: {
-          where: { tenantId: session.tenantId, status: "COMPLETED" },
-          select: { method: true, amount: true },
-        },
+        payments: { where: { tenantId: session.tenantId }, select: { method: true, amount: true, status: true } },
         _count: { select: { items: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -135,18 +132,19 @@ export default async function Dashboard() {
   const maxHour = Math.max(...hourly, 0);
 
   const metrics = [
-    ["Sales today", money(salesTotal, currency), `${todaySales.length} completed sale${todaySales.length === 1 ? "" : "s"}`],
-    ["Gross profit", money(grossProfit, currency), "From completed sales"],
-    ["Transactions", String(todaySales.length), "Today"],
-    ["Active shifts", String(activeShifts), activeShifts ? "Currently open" : "No open shifts"],
-    [
-      "Low stock",
-      String(lowStock.length),
-      tenantSettings.inventory.lowStockAlerts
+    { label: "Sales today", value: money(salesTotal, currency), note: `${todaySales.length} completed sale${todaySales.length === 1 ? "" : "s"}`, href: "/app/sales" },
+    { label: "Gross profit", value: money(grossProfit, currency), note: "From completed sales", href: "/app/reports" },
+    { label: "Transactions", value: String(todaySales.length), note: "Today", href: "/app/sales" },
+    { label: "Active shifts", value: String(activeShifts), note: activeShifts ? "Currently open" : "No open shifts", href: "/app/staff" },
+    {
+      label: "Low stock",
+      value: String(lowStock.length),
+      note: tenantSettings.inventory.lowStockAlerts
         ? lowStock.length ? "Needs attention" : "No alerts"
         : "Alerts disabled in Settings",
-    ],
-    ["Receivables", money(receivables, currency), `${invoices.length} outstanding invoice${invoices.length === 1 ? "" : "s"}`],
+      href: "/app/inventory",
+    },
+    { label: "Receivables", value: money(receivables, currency), note: `${invoices.length} outstanding invoice${invoices.length === 1 ? "" : "s"}`, href: "/app/invoices" },
   ];
 
   return (
@@ -164,10 +162,10 @@ export default async function Dashboard() {
       </div>
 
       <div className="metrics">
-        {metrics.map(([label, value, note]) => (
-          <article className="metric" key={label}>
+        {metrics.map(({ label, value, note, href }) => (
+          <a className="metric" href={href} key={label} style={{ color: "inherit", textDecoration: "none" }}>
             <small>{label}</small><strong>{value}</strong><span>{note}</span>
-          </article>
+          </a>
         ))}
       </div>
 
@@ -235,7 +233,7 @@ export default async function Dashboard() {
                 <div><strong>{sale.saleNumber}</strong><small>{sale._count.items} item{sale._count.items === 1 ? "" : "s"}</small></div>
                 <div><strong>{sale.branch.name}</strong><small>{sale.branch.code}</small></div>
                 <div><strong>{sale.cashier.fullName}</strong><small>@{sale.cashier.staffNumber}</small></div>
-                <div><strong>{sale.payments.map((payment) => payment.method).join(", ") || "Unspecified"}</strong><small>{sale.payments.length} payment{sale.payments.length === 1 ? "" : "s"}</small></div>
+                <div><strong>{sale.payments.map((payment) => payment.method === "Credit" ? "Customer — Pay Later" : payment.method).join(", ") || "Unspecified"}</strong><small>{sale.payments.some((payment) => payment.status === "PENDING") ? "Outstanding customer balance" : `${sale.payments.length} payment${sale.payments.length === 1 ? "" : "s"}`}</small></div>
                 <strong>{money(Number(sale.total), currency)}</strong>
                 <time dateTime={sale.createdAt.toISOString()}>{sale.createdAt.toLocaleString("en-KE", { timeZone: user.tenant.timezone, dateStyle: "short", timeStyle: "short" })}</time>
               </div>

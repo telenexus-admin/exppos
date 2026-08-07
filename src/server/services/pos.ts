@@ -52,20 +52,17 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
       throw new AppError("SPLIT_PAYMENT_DISABLED", "Split payments are disabled in this business settings", 409);
     }
     for (const payment of input.payments) {
-      if (!enabledPayments.has(payment.method as never)) {
+      if (payment.method !== "Credit" && !enabledPayments.has(payment.method as never)) {
         throw new AppError("PAYMENT_METHOD_DISABLED", `${payment.method} is disabled in this business settings`, 409);
       }
-      if (payment.method === "Credit" && !settings.pos.allowCreditSales) {
-        throw new AppError("CREDIT_SALES_DISABLED", "Credit sales are disabled in this business settings", 409);
-      }
-      if (payment.method !== "Cash" && settings.payments.requireReferenceForNonCash && !payment.externalReference?.trim()) {
+      if (payment.method !== "Cash" && payment.method !== "Credit" && settings.payments.requireReferenceForNonCash && !payment.externalReference?.trim()) {
         throw new AppError("PAYMENT_REFERENCE_REQUIRED", `Enter the ${payment.method} transaction reference`, 422);
       }
     }
 
     const usesCredit = input.payments.some((payment) => payment.method === "Credit");
-    if (usesCredit && settings.pos.requireCustomerForCredit && !input.customerId) {
-      throw new AppError("CREDIT_CUSTOMER_REQUIRED", "Select a customer before completing a credit sale", 422);
+    if (usesCredit && !input.customerId) {
+      throw new AppError("CREDIT_CUSTOMER_REQUIRED", "Select the customer who will pay later", 422);
     }
 
     const shift = await tx.shift.findFirst({
@@ -79,12 +76,10 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
     });
     if (!shift) throw new AppError("SHIFT_REQUIRED", "An open shift is required", 409);
 
-    if (
-      input.customerId &&
-      !(await tx.customer.findFirst({ where: { id: input.customerId, tenantId: ctx.tenantId, deletedAt: null } }))
-    ) {
-      throw new AppError("CUSTOMER_NOT_FOUND", "Customer not found", 404);
-    }
+    const customer = input.customerId
+      ? await tx.customer.findFirst({ where: { id: input.customerId, tenantId: ctx.tenantId, deletedAt: null, status: "active" } })
+      : null;
+    if (input.customerId && !customer) throw new AppError("CUSTOMER_NOT_FOUND", "Customer not found", 404);
 
     let subtotal = new Prisma.Decimal(0);
     let discount = new Prisma.Decimal(0);
@@ -175,11 +170,28 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
 
     const netSales = subtotal.minus(discount);
     const total = settings.taxReceipt.pricesIncludeTax ? netSales : netSales.plus(tax);
-    const paid = input.payments.reduce(
+    const covered = input.payments.reduce(
       (sum, payment) => sum.plus(payment.amount),
       new Prisma.Decimal(0),
     );
-    if (paid.lt(total)) throw new AppError("PAYMENT_SHORT", "Payment does not cover sale total", 422);
+    if (covered.lt(total)) throw new AppError("PAYMENT_SHORT", "Payment does not cover sale total", 422);
+    const creditAmount = input.payments.reduce(
+      (sum, payment) => payment.method === "Credit" ? sum.plus(payment.amount) : sum,
+      new Prisma.Decimal(0),
+    );
+    const paid = input.payments.reduce(
+      (sum, payment) => payment.method === "Credit" ? sum : sum.plus(payment.amount),
+      new Prisma.Decimal(0),
+    );
+    if (creditAmount.gt(0) && customer?.creditLimit.gt(0)) {
+      const outstanding = await tx.invoice.aggregate({
+        where: { tenantId: ctx.tenantId, customerId: customer.id, balance: { gt: 0 }, status: { notIn: ["CANCELLED", "VOIDED", "REFUNDED"] } },
+        _sum: { balance: true },
+      });
+      if (new Prisma.Decimal(outstanding._sum.balance ?? 0).plus(creditAmount).gt(customer.creditLimit)) {
+        throw new AppError("CREDIT_LIMIT_EXCEEDED", `${customer.fullName}'s pay-later credit limit would be exceeded`, 409);
+      }
+    }
 
     const saleNumber = await nextNumber(tx, ctx.tenantId, "sale", "SALE");
     const sale = await tx.sale.create({
@@ -204,10 +216,25 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
             amount: new Prisma.Decimal(payment.amount),
             externalReference: payment.externalReference?.trim() || null,
             receivedBy: ctx.userId,
+            status: payment.method === "Credit" ? "PENDING" : "COMPLETED",
           })),
         },
       },
     });
+
+    let invoiceNumber: string | null = null;
+    if (creditAmount.gt(0) && customer) {
+      invoiceNumber = await nextNumber(tx, ctx.tenantId, "invoice", "INV");
+      await tx.invoice.create({ data: {
+        tenantId: ctx.tenantId,
+        customerId: customer.id,
+        number: invoiceNumber,
+        status: "SUBMITTED",
+        total: creditAmount,
+        balance: creditAmount,
+        dueAt: new Date(Date.now() + 30 * 86_400_000),
+      } });
+    }
 
     const stockItems = items.filter((item) => item.trackStock);
     if (stockItems.length > 0) {
@@ -234,7 +261,8 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
         referenceId: sale.id,
         description: sale.saleNumber,
         lines: { create: [
-          { accountCode: "1000", debit: total, credit: 0 },
+          ...(paid.gt(0) ? [{ accountCode: "1000", debit: paid, credit: new Prisma.Decimal(0) }] : []),
+          ...(creditAmount.gt(0) ? [{ accountCode: "1100", debit: creditAmount, credit: new Prisma.Decimal(0) }] : []),
           { accountCode: "4000", debit: 0, credit: revenue },
           { accountCode: "2100", debit: 0, credit: tax },
           { accountCode: "5000", debit: cost, credit: 0 },
@@ -252,9 +280,12 @@ export async function completeSale(db: PrismaClient, ctx: TenantContext, input: 
         saleNumber,
         total: total.toString(),
         cashierId: ctx.userId,
+        customerId: customer?.id,
+        payLaterAmount: creditAmount.toString(),
+        invoiceNumber,
       },
     });
 
-    return sale;
+    return { ...sale, invoiceNumber };
   }, { isolationLevel: "Serializable" });
 }

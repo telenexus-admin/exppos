@@ -13,6 +13,7 @@ import type { Permission } from "@/server/security/context";
 const schema = z.object({
   identifier: z.string().trim().min(3, "Enter your username, email address, or phone number"),
   password: z.string().min(1, "Enter your password"),
+  portal: z.enum(["admin", "staff"]).default("admin"),
 });
 const activeTenantStatuses = ["TRIAL", "ACTIVE", "GRACE_PERIOD"] as const;
 const userInclude = {
@@ -180,6 +181,13 @@ export async function POST(req: NextRequest) {
     if (roleCodes.length === 0) {
       throw new AppError("ACCOUNT_NOT_READY", "This account has no role assigned. Ask the administrator or operator to update it.", 409);
     }
+    const isAdmin = roleCodes.includes("TENANT_ADMIN");
+    if (body.portal === "admin" && !isAdmin) {
+      throw new AppError("WRONG_LOGIN_PORTAL", "This is a staff account. Use the staff login page.", 403);
+    }
+    if (body.portal === "staff" && isAdmin) {
+      throw new AppError("WRONG_LOGIN_PORTAL", "This is an administrator account. Use the admin login page.", 403);
+    }
 
     const permissions = new Set(
       tenantRoles.flatMap((userRole) => userRole.role.rolePermissions.map((rolePermission) => rolePermission.permission.code as Permission)),
@@ -217,7 +225,7 @@ export async function POST(req: NextRequest) {
     }
 
     await recordLoginAttempt({ tenantKey: user.tenantId, identifierHash, ipAddress, succeeded: true });
-    const destination = roleCodes.includes("TENANT_ADMIN") ? "/app/dashboard" : "/staff/dashboard";
+    const destination = body.portal === "admin" ? "/app/dashboard" : "/staff/dashboard";
     const response = NextResponse.json({
       ok: true,
       destination,

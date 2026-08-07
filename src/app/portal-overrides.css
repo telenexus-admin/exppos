@@ -1,5 +1,6 @@
 .portal-mobile-backdrop,
-.portal-mobile-close {
+.portal-mobile-close,
+.portal-mobile-nav {
   display: none;
 }
 
@@ -119,6 +120,75 @@
   .portal--mobile-open .portal-nav-label {
     display: inline;
   }
+
+  .portal-mobile-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 70;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    min-height: calc(66px + env(safe-area-inset-bottom));
+    padding: 7px 5px calc(7px + env(safe-area-inset-bottom));
+    border-top: 1px solid #d8e3de;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 -10px 32px rgba(16, 45, 34, .1);
+    backdrop-filter: blur(14px);
+  }
+
+  .portal-mobile-nav--staff { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  .portal-mobile-nav a,
+  .portal-mobile-nav button {
+    display: grid;
+    min-width: 0;
+    place-items: center;
+    gap: 3px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #60766c;
+    padding: 4px 2px;
+    font-size: .62rem;
+    font-weight: 800;
+  }
+
+  .portal-mobile-nav a.active {
+    background: #e2f5eb;
+    color: #126445;
+  }
+
+  .portal-mobile-nav svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .portal .workspace {
+    padding: 16px 16px calc(92px + env(safe-area-inset-bottom));
+  }
+
+  .portal .workspace > header {
+    margin: -16px -16px 18px;
+    padding: 10px 16px;
+  }
+
+  .portal-title-row { min-width: 0; flex: 1; }
+  .portal-title-row > div { min-width: 0; }
+  .portal .workspace header h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.25rem; }
+  .portal .workspace header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+@media (max-width: 520px) {
+  .portal .workspace { padding-inline: 12px; }
+  .portal .workspace > header { margin-inline: -12px; padding-inline: 12px; }
+  .portal .metrics { grid-template-columns: 1fr; }
+  .portal .metric { min-height: 106px; }
+  .portal .grid { gap: 12px; margin-top: 12px; }
+  .portal .panel { padding: 16px; border-radius: 14px; }
+  .portal .panel-head { align-items: flex-start; gap: 10px; }
+  .portal .panel-head .notification-link { padding: 8px 10px; }
+  .portal .dashboard-sales-panel { margin-bottom: 4px; }
 }
 
 .shift-modal {

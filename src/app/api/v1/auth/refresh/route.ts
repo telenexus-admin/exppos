@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { hashToken, newRefreshToken, signAccessToken } from "@/server/security/tokens";
 import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 import type { Permission } from "@/server/security/context";
+import { publicUrl } from "@/server/public-url";
 
 const ACTIVE_TENANT_STATUSES = ["TRIAL", "ACTIVE", "GRACE_PERIOD"] as const;
 const REFRESH_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
@@ -25,7 +26,7 @@ async function refreshSession(req: NextRequest, redirectAfterRefresh: boolean) {
 
   if (!rawRefreshToken) {
     const response = redirectAfterRefresh
-      ? NextResponse.redirect(new URL("/login?reason=session-expired", req.url))
+      ? NextResponse.redirect(publicUrl("/login?reason=session-expired", req))
       : NextResponse.json({ error: { code: "UNAUTHENTICATED", message: "Authentication required" } }, { status: 401 });
     clearSessionCookies(response);
     return response;
@@ -65,7 +66,7 @@ async function refreshSession(req: NextRequest, redirectAfterRefresh: boolean) {
     }
 
     const response = redirectAfterRefresh
-      ? NextResponse.redirect(new URL("/login?reason=session-expired", req.url))
+      ? NextResponse.redirect(publicUrl("/login?reason=session-expired", req))
       : NextResponse.json({ error: { code: "UNAUTHENTICATED", message: "Session is invalid or expired" } }, { status: 401 });
     clearSessionCookies(response);
     return response;
@@ -99,7 +100,7 @@ async function refreshSession(req: NextRequest, redirectAfterRefresh: boolean) {
   });
 
   const response = redirectAfterRefresh
-    ? NextResponse.redirect(new URL(safeNextPath(req), req.url))
+    ? NextResponse.redirect(publicUrl(safeNextPath(req), req))
     : NextResponse.json({ ok: true });
   const secure = process.env.APP_URL?.startsWith("https://") ?? false;
 
@@ -148,7 +149,7 @@ export async function GET(req: NextRequest) {
     return await refreshSession(req, true);
   } catch (error) {
     console.error("Tenant session refresh redirect failed", error);
-    const response = NextResponse.redirect(new URL("/login?reason=session-expired", req.url));
+    const response = NextResponse.redirect(publicUrl("/login?reason=session-expired", req));
     clearSessionCookies(response);
     return response;
   }

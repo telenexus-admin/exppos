@@ -201,7 +201,7 @@ export function SettingsForm({ initial }: { initial: TenantSettingsInitial }) {
           <div className="settings-toggle-grid">
             <Toggle name="allowDiscounts" title="Allow discounts" description="Cashiers may apply item discounts within the configured limit." defaultChecked={metadata.pos.allowDiscounts} />
             <Toggle name="allowPriceOverrides" title="Allow price overrides" description="Users still need the sale.override_price permission." defaultChecked={metadata.pos.allowPriceOverrides} />
-            <Toggle name="allowCreditSales" title="Allow credit sales" description="Show Credit as an available payment method." defaultChecked={metadata.pos.allowCreditSales} />
+            <Toggle name="allowCreditSales" title="Customer — Pay Later" description="Staff can select an existing customer and post the sale to their account." defaultChecked disabled />
             <Toggle name="requireCustomerForCredit" title="Customer required for credit" description="Credit transactions must be linked to a customer." defaultChecked={metadata.pos.requireCustomerForCredit} />
             <Toggle name="confirmBeforePayment" title="Confirm before payment" description="Show a final confirmation before recording the transaction." defaultChecked={metadata.pos.confirmBeforePayment} />
             <Toggle name="autoPrintReceipt" title="Auto-print receipt" description="Prepare the receipt automatically after a successful sale." defaultChecked={metadata.pos.autoPrintReceipt} />
@@ -215,7 +215,7 @@ export function SettingsForm({ initial }: { initial: TenantSettingsInitial }) {
         <Section id="payments" number="03" title="Payment methods" description="Choose the payment choices visible at checkout and configure M-Pesa collection details.">
           <div className="settings-choice-grid">
             {PAYMENT_METHODS.map((method) => (
-              <label key={method} className="settings-choice"><input type="checkbox" name="enabledMethods" value={method} defaultChecked={metadata.payments.enabledMethods.includes(method)} /><span><strong>{method}</strong><small>{method === "Credit" ? "Requires credit sales to be enabled" : "Available at checkout"}</small></span></label>
+              <label key={method} className="settings-choice"><input type="checkbox" name="enabledMethods" value={method} defaultChecked={method === "Credit" || metadata.payments.enabledMethods.includes(method)} disabled={method === "Credit"} /><span><strong>{method === "Credit" ? "Customer — Pay Later" : method}</strong><small>{method === "Credit" ? "Always available for active customer accounts" : "Available at checkout"}</small></span></label>
             ))}
           </div>
           <div className="settings-toggle-grid">

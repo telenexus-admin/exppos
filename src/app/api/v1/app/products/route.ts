@@ -18,6 +18,10 @@ const schema = z.object({
     .regex(/^[A-Za-z0-9._-]+$/, "SKU may only contain letters, numbers, dots, underscores, or hyphens")
     .transform((value) => value.toUpperCase()),
   barcode: z.union([z.string().trim().max(100), z.literal("")]).optional(),
+  imageData: z.union([
+    z.string().max(2_100_000, "Product image is too large. Use an image below 1.5 MB.").regex(/^data:image\/(png|jpeg|webp);base64,/, "Use a PNG, JPG, or WebP image"),
+    z.literal(""),
+  ]).optional(),
   categoryId: z.union([z.string().trim().min(1), z.literal("")]).optional(),
   branchId: z.string().trim().min(1, "Select a branch"),
   costPrice: z.coerce.number().finite().min(0, "Cost price cannot be negative"),
@@ -49,6 +53,7 @@ export async function POST(req: NextRequest) {
 
     const body = schema.parse(await req.json());
     const barcode = body.barcode?.trim() || null;
+    const imageData = body.imageData || null;
     const categoryId = body.categoryId?.trim() || null;
     const initialStock = new Prisma.Decimal(body.trackStock ? body.initialStock : 0);
     const reorderLevel = new Prisma.Decimal(body.trackStock ? body.reorderLevel : 0);
@@ -90,6 +95,7 @@ export async function POST(req: NextRequest) {
           sku: body.sku,
           barcode,
           name: body.name,
+          imageData,
           costPrice: new Prisma.Decimal(body.costPrice),
           sellingPrice: new Prisma.Decimal(body.sellingPrice),
           taxRate: new Prisma.Decimal(body.taxPercent).div(100),
@@ -144,6 +150,7 @@ export async function POST(req: NextRequest) {
           name: result.name,
           sku: result.sku,
           barcode: result.barcode,
+          hasImage: Boolean(imageData),
           branchId: result.branchId,
           initialStock: result.initialStock,
         },

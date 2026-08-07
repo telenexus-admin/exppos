@@ -5,6 +5,7 @@ import { appendAudit } from "@/server/audit/audit";
 import { apiError } from "@/server/http";
 import { requireOperator } from "@/server/operator-auth";
 import { hashToken } from "@/server/security/tokens";
+import { publicUrl } from "@/server/public-url";
 
 export async function GET(
   req: NextRequest,
@@ -42,7 +43,7 @@ export async function GET(
       deviceInfo: req.headers.get("user-agent") ?? undefined,
     }).catch((error) => console.error("Unable to audit tenant login switch", error));
 
-    const loginUrl = new URL("/login", req.url);
+    const loginUrl = publicUrl("/login", req);
     loginUrl.searchParams.set("switch", "1");
 
     const response = NextResponse.redirect(loginUrl);

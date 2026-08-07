@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { authenticatedFetch } from "@/lib/authenticated-fetch";
 
@@ -29,6 +29,8 @@ export function ProductManager({
   canCreate,
   currentProducts,
   maxProducts,
+  inventoryValue,
+  currency,
   defaultTaxPercent,
   defaultReorderLevel,
 }: {
@@ -37,6 +39,8 @@ export function ProductManager({
   canCreate: boolean;
   currentProducts: number;
   maxProducts: number;
+  inventoryValue: number;
+  currency: string;
   defaultTaxPercent: number;
   defaultReorderLevel: number;
 }) {
@@ -48,14 +52,28 @@ export function ProductManager({
   const [trackStock, setTrackStock] = useState(true);
   const [productName, setProductName] = useState("");
   const [sku, setSku] = useState("");
+  const [imageData, setImageData] = useState("");
   const limitReached = currentProducts >= maxProducts;
   const disabled = !canCreate || limitReached || branches.length === 0;
-  const usage = useMemo(() => `${currentProducts} of ${maxProducts} products used`, [currentProducts, maxProducts]);
 
   function close() {
     if (loading) return;
     setOpen(false);
     setError("");
+  }
+
+  async function selectImage(file: File | undefined) {
+    setError("");
+    if (!file) { setImageData(""); return; }
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setError("Use a PNG, JPG, or WebP image."); return; }
+    if (file.size > 1_500_000) { setError("Product image must be below 1.5 MB."); return; }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Unable to read the image"));
+      reader.readAsDataURL(file);
+    });
+    setImageData(dataUrl);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -75,6 +93,7 @@ export function ProductManager({
           name: data.get("name"),
           sku: data.get("sku"),
           barcode: data.get("barcode"),
+          imageData,
           categoryId: data.get("categoryId"),
           branchId: data.get("branchId"),
           costPrice: data.get("costPrice"),
@@ -102,6 +121,7 @@ export function ProductManager({
       setTrackStock(true);
       setProductName("");
       setSku("");
+      setImageData("");
       setOpen(false);
       router.refresh();
     } catch {
@@ -117,7 +137,7 @@ export function ProductManager({
         <button className="primary catalog-primary-action" type="button" disabled={disabled} onClick={() => { setSuccess(null); setOpen(true); }}>
           <span aria-hidden="true">＋</span> Add product
         </button>
-        <small>{usage}</small>
+        <small>Inventory Value · {currency} {inventoryValue.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</small>
       </div>
 
       {!canCreate && <p className="catalog-inline-warning">Your account does not have permission to add products.</p>}
@@ -149,6 +169,7 @@ export function ProductManager({
               <label className="catalog-span-2">Product name<input name="name" required minLength={2} maxLength={160} value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="e.g. 500ml Mineral Water" /></label>
               <label>SKU<div className="catalog-input-action"><input name="sku" required minLength={2} maxLength={60} pattern="[A-Za-z0-9._-]+" value={sku} onChange={(event) => setSku(event.target.value.toUpperCase())} placeholder="WATER-500" /><button type="button" onClick={() => setSku(generateSku(productName))}>Generate</button></div></label>
               <label>Barcode <small>(optional)</small><input name="barcode" maxLength={100} placeholder="Scan or type barcode" /></label>
+              <label className="catalog-span-2 catalog-image-upload">Product image or camera photo <small>(optional · PNG, JPG or WebP · max 1.5 MB)</small><input name="image" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" aria-label="Upload or take a product photo" onChange={(event) => { void selectImage(event.target.files?.[0]); }} />{imageData && <div className="catalog-image-preview"><img src={imageData} alt="Product preview" /><button type="button" onClick={() => { setImageData(""); const input = document.querySelector<HTMLInputElement>('input[name="image"]'); if (input) input.value = ""; }}>Remove image</button></div>}</label>
               <label>Category<select name="categoryId" defaultValue=""><option value="">Uncategorized</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
               <label>Select branch for this product<select name="branchId" required defaultValue=""><option value="" disabled>Select branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.code ? ` (${branch.code})` : ""}</option>)}</select></label>
               <label>Cost price<input name="costPrice" type="number" min="0" step="0.01" defaultValue="0" required /></label>

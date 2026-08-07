@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { hashToken } from "@/server/security/tokens";
+import { publicUrl } from "@/server/public-url";
 
 export async function GET(req: NextRequest) {
   const refreshToken = req.cookies.get("tenant_refresh")?.value;
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
     }).catch((error) => console.error("Unable to revoke tenant session during logout", error));
   }
 
-  const response = NextResponse.redirect(new URL("/login", req.url));
+  const response = NextResponse.redirect(publicUrl("/login", req));
   response.cookies.set("tenant_session", "", { httpOnly: true, expires: new Date(0), path: "/" });
   response.cookies.set("tenant_refresh", "", { httpOnly: true, expires: new Date(0), path: "/" });
   response.cookies.set("tenant_refresh", "", { httpOnly: true, expires: new Date(0), path: "/api/v1/auth" });

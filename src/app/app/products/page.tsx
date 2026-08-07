@@ -65,6 +65,10 @@ export default async function ProductsPage() {
     (sum, product) => sum + product.inventories.reduce((inner, inventory) => inner + Number(inventory.quantity), 0),
     0,
   );
+  const inventoryValue = products.reduce(
+    (sum, product) => sum + product.inventories.reduce((inner, inventory) => inner + Number(inventory.quantity) * Number(product.costPrice), 0),
+    0,
+  );
   const canEdit = session.permissions.has("product.update");
   const metadata = normalizeTenantSettings(tenant.settings?.metadata);
 
@@ -82,6 +86,8 @@ export default async function ProductsPage() {
           canCreate={session.permissions.has("product.create")}
           currentProducts={products.length}
           maxProducts={maxProducts}
+          inventoryValue={inventoryValue}
+          currency={currency}
           defaultTaxPercent={metadata.taxReceipt.taxEnabled ? Number(tenant.settings?.taxRate ?? 0) * 100 : 0}
           defaultReorderLevel={metadata.inventory.defaultReorderLevel}
         />

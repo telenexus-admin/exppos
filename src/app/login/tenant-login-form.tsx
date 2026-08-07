@@ -18,11 +18,12 @@ type LoginResponse = {
   };
 };
 
-export function TenantLoginForm({ switching = false }: { switching?: boolean }) {
+export function TenantLoginForm({ switching = false, mode = "admin" }: { switching?: boolean; mode?: "admin" | "staff" }) {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [forgotNotice, setForgotNotice] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -60,7 +61,7 @@ export function TenantLoginForm({ switching = false }: { switching?: boolean }) 
           "content-type": "application/json",
           accept: "application/json",
         },
-        body: JSON.stringify({ identifier, password }),
+        body: JSON.stringify({ identifier, password, portal: mode }),
         signal: controller.signal,
       });
 
@@ -93,11 +94,7 @@ export function TenantLoginForm({ switching = false }: { switching?: boolean }) 
         ? body.destination
         : "/staff/dashboard";
 
-      setStatus(
-        destination.startsWith("/staff")
-          ? "Login successful. Opening your staff dashboard…"
-          : "Login successful. Opening your admin dashboard…",
-      );
+      setStatus(mode === "staff" ? "Login successful. Opening your staff dashboard…" : "Login successful. Opening your admin dashboard…");
       navigating = true;
       window.location.assign(destination);
     } catch (requestError) {
@@ -115,10 +112,10 @@ export function TenantLoginForm({ switching = false }: { switching?: boolean }) 
 
   return (
     <form className="login-card tenant-login-card" onSubmit={submit} noValidate>
-      <p className="eyebrow">ADMIN &amp; STAFF SIGN IN</p>
-      <h2>Welcome back</h2>
+      <p className="eyebrow">{mode === "staff" ? "STAFF SIGN IN" : "ADMIN SIGN IN"}</p>
+      <h2>Welcome Back</h2>
       <p className="tenant-login-help">
-        Use your username, email address, or phone number together with your password. A business code is no longer required.
+        Sign in to continue to your workspace.
       </p>
 
       {switching && (
@@ -128,10 +125,10 @@ export function TenantLoginForm({ switching = false }: { switching?: boolean }) 
       )}
 
       <label>
-        Username, email, or phone
+        Email Address or Username
         <input
           name="identifier"
-          placeholder="dennis, admin@business.com, or 07…"
+          placeholder="Enter your email or username"
           required
           minLength={3}
           autoComplete="username"
@@ -158,21 +155,37 @@ export function TenantLoginForm({ switching = false }: { switching?: boolean }) 
             aria-label={showPassword ? "Hide password" : "Show password"}
             disabled={loading}
           >
-            {showPassword ? "Hide" : "Show"}
+            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+              <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+              <circle cx="12" cy="12" r="2.5" />
+              {!showPassword && <path d="m3 3 18 18" />}
+            </svg>
+            <span className="sr-only">{showPassword ? "Hide password" : "Show password"}</span>
           </button>
         </span>
       </label>
+
+      <button className="tenant-login-forgot" type="button" onClick={() => setForgotNotice(true)}>Forgot Password?</button>
+
+      {forgotNotice && (
+        <div className="tenant-recovery-notice" role="alert">
+          <span>Password recovery not available at the moment contact our support team on 0724657480 for further assistance</span>
+          <button type="button" aria-label="Close password recovery notice" onClick={() => setForgotNotice(false)}>×</button>
+        </div>
+      )}
 
       {error && <p className="form-error login-error" role="alert">{error}</p>}
       {status && <p className="login-status" role="status" aria-live="polite">{status}</p>}
 
       <button className="primary tenant-login-submit" type="submit" disabled={loading}>
-        {loading ? "Signing in…" : "Open my dashboard"}
+        {loading ? "Signing in…" : "Sign In"}
       </button>
 
-      <small className="tenant-login-note">
-        Tenant administrators open the admin dashboard. Cashiers and other staff open the staff dashboard.
-      </small>
+      {mode === "admin" && (
+        <div className="tenant-login-switch" role="navigation" aria-label="Login type">
+          <span>Staff member? <a href="/staff/login">Staff login</a></span>
+        </div>
+      )}
     </form>
   );
 }

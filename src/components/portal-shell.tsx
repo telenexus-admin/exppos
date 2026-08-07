@@ -14,6 +14,7 @@ type IconName =
   | "sales"
   | "invoices"
   | "accounting"
+  | "expenses"
   | "reports"
   | "tasks"
   | "audit"
@@ -30,6 +31,11 @@ type NavigationItem = {
   icon: IconName;
 };
 
+type NavigationGroup = {
+  label: string;
+  items: NavigationItem[];
+};
+
 const tenantSections: NavigationItem[] = [
   { label: "Dashboard", slug: "dashboard", href: "/app/dashboard", icon: "dashboard" },
   { label: "Point of Sale", slug: "pos", href: "/app/pos", icon: "cart" },
@@ -42,11 +48,45 @@ const tenantSections: NavigationItem[] = [
   { label: "Sales", slug: "sales", href: "/app/sales", icon: "sales" },
   { label: "Invoices", slug: "invoices", href: "/app/invoices", icon: "invoices" },
   { label: "Accounting", slug: "accounting", href: "/app/accounting", icon: "accounting" },
+  { label: "Expenses", slug: "expenses", href: "/app/expenses", icon: "expenses" },
   { label: "Reports", slug: "reports", href: "/app/reports", icon: "reports" },
   { label: "Tasks", slug: "tasks", href: "/app/tasks", icon: "tasks" },
   { label: "Audit Logs", slug: "audit-logs", href: "/app/audit-logs", icon: "audit" },
   { label: "Settings", slug: "settings", href: "/app/settings", icon: "settings" },
 ];
+
+const tenantNavigationGroups: NavigationGroup[] = [
+  { label: "", items: tenantSections.filter((item) => item.slug === "dashboard") },
+  { label: "Operations", items: tenantSections.filter((item) => ["pos", "sales", "purchases", "invoices"].includes(item.slug)) },
+  { label: "Inventory", items: tenantSections.filter((item) => ["products", "inventory"].includes(item.slug)) },
+  { label: "Customers", items: tenantSections.filter((item) => item.slug === "customers") },
+  { label: "Finance", items: tenantSections.filter((item) => ["accounting", "expenses"].includes(item.slug)) },
+  { label: "Reports", items: tenantSections.filter((item) => item.slug === "reports") },
+  { label: "Administration", items: tenantSections.filter((item) => ["branches", "staff", "tasks", "audit-logs", "settings"].includes(item.slug)) },
+];
+
+const salesSubsections = [
+  { label: "New Sale", href: "/app/pos" },
+  { label: "Sales History", href: "/app/sales?tab=history" },
+  { label: "Returns & Refunds", href: "/app/sales?tab=returns" },
+  { label: "Quotations / Estimates", href: "/app/sales?tab=quotations" },
+  { label: "Customer List", href: "/app/sales?tab=customer-list" },
+  { label: "Credit Customers", href: "/app/sales?tab=credit-customers" },
+  { label: "Loyalty Points", href: "/app/sales?tab=loyalty-points" },
+  { label: "Receive Payment", href: "/app/sales?tab=receive-payment" },
+  { label: "Pending Payments", href: "/app/sales?tab=pending-payments" },
+  { label: "Payment Methods", href: "/app/sales?tab=payment-methods" },
+  { label: "Promotions & Discounts", href: "/app/sales?tab=promotions" },
+  { label: "Open / Close Register", href: "/app/sales?tab=cash-open-close" },
+  { label: "Cash Movements", href: "/app/sales?tab=cash-movements" },
+  { label: "Daily Sales", href: "/app/sales?tab=daily-sales" },
+  { label: "Sales Summary", href: "/app/sales?tab=sales-summary" },
+  { label: "Profit Report", href: "/app/sales?tab=profit-report" },
+  { label: "Sales by Product", href: "/app/sales?tab=by-product" },
+  { label: "Sales by Cashier", href: "/app/sales?tab=by-cashier" },
+];
+
+const salesNewUntil = Date.parse("2026-07-26T23:59:59Z");
 
 const staffSections: NavigationItem[] = [
   { label: "My Dashboard", slug: "dashboard", href: "/staff/dashboard", icon: "dashboard" },
@@ -74,6 +114,7 @@ function PortalIcon({ name }: { name: IconName }) {
     sales: <><path d="M3 3v18h18" /><path d="m7 16 4-5 3 3 5-7" /><path d="M16 7h3v3" /></>,
     invoices: <><path d="M6 2h9l5 5v15H6Z" /><path d="M14 2v6h6" /><path d="M9 13h8" /><path d="M9 17h6" /></>,
     accounting: <><rect x="3" y="2" width="18" height="20" rx="2" /><path d="M7 6h10" /><path d="M7 10h2" /><path d="M12 10h2" /><path d="M17 10h0" /><path d="M7 14h2" /><path d="M12 14h2" /><path d="M17 14h0" /><path d="M7 18h2" /><path d="M12 18h5" /></>,
+    expenses: <><path d="M4 7h16v13H4z" /><path d="M7 7V4h10v3" /><path d="M4 11h16" /><path d="M15 15h2" /></>,
     reports: <><path d="M4 19V9" /><path d="M10 19V5" /><path d="M16 19v-7" /><path d="M22 19V3" /><path d="M2 21h22" /></>,
     tasks: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="m8 9 2 2 4-4" /><path d="M8 15h8" /></>,
     audit: <><path d="M12 22a10 10 0 1 0-10-10" /><path d="M2 4v6h6" /><path d="M12 6v6l4 2" /></>,
@@ -104,7 +145,10 @@ export function PortalShell({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const sections = basePath === "/staff" ? staffSections : tenantSections;
+  const [salesExpanded, setSalesExpanded] = useState(current === "sales");
+  const navigationGroups = basePath === "/staff"
+    ? [{ label: "", items: staffSections }]
+    : tenantNavigationGroups;
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -132,7 +176,6 @@ export function PortalShell({
       <aside className="portal-sidebar" id="portal-navigation">
         <div className="portal-sidebar-head">
           <a className="brand portal-brand" href={`${basePath}/dashboard`} onClick={() => setMobileOpen(false)}>
-            <span className="portal-brand-mark">SH</span>
             <span className="portal-brand-copy">Speedyhive<small>Cloud POS</small></span>
           </a>
           <button
@@ -154,17 +197,43 @@ export function PortalShell({
         </div>
 
         <nav aria-label="Main navigation">
-          {sections.map((item) => (
-            <a
-              className={current === item.slug ? "active" : ""}
-              href={item.href}
-              key={item.slug}
-              onClick={() => setMobileOpen(false)}
-              title={collapsed ? item.label : undefined}
-            >
-              <span className="portal-nav-icon"><PortalIcon name={item.icon} /></span>
-              <span className="portal-nav-label">{item.label}</span>
-            </a>
+          {navigationGroups.map((group) => (
+            <section className="portal-nav-group" key={group.label || "primary"}>
+              {group.label && <h3 className="portal-nav-group-heading">{group.label}</h3>}
+              {group.items.map((item) => (
+                <div key={item.slug}>
+              <a
+                className={current === item.slug ? "active" : ""}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                title={collapsed ? item.label : undefined}
+              >
+                <span className="portal-nav-icon"><PortalIcon name={item.icon} /></span>
+                <span className="portal-nav-label">{item.label}</span>
+                {item.slug === "sales" && Date.now() < salesNewUntil && !collapsed && <span className="portal-new-badge">NEW</span>}
+              </a>
+              {item.slug === "sales" && !collapsed && (
+                <button
+                  aria-label={salesExpanded ? "Collapse Sales submenu" : "Expand Sales submenu"}
+                  aria-expanded={salesExpanded}
+                  className="portal-nav-chevron"
+                  onClick={() => setSalesExpanded((value) => !value)}
+                  type="button"
+                >{salesExpanded ? "⌃" : "⌄"}</button>
+              )}
+              {item.slug === "sales" && current === "sales" && salesExpanded && !collapsed && (
+                <div className="portal-sales-subnav" aria-label="Sales navigation">
+                  {salesSubsections.map((subsection) => (
+                    <a href={subsection.href} key={subsection.href} onClick={() => setMobileOpen(false)}>
+                      <span aria-hidden="true">•</span>
+                      <span>{subsection.label}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+                </div>
+              ))}
+            </section>
           ))}
         </nav>
 
@@ -197,13 +266,22 @@ export function PortalShell({
             </button>
             <div><small>{branchName}</small><h2>{title}</h2></div>
           </div>
-          <div className="header-actions">
-            <a className="notification-link portal-notification-link" href={`${basePath}/notifications`}><PortalIcon name="bell" /><span>Notifications</span></a>
-            <a className="primary action-link" href="/app/pos">New sale</a>
-          </div>
         </header>
         {children}
       </section>
+      <nav className={`portal-mobile-nav${basePath === "/staff" ? " portal-mobile-nav--staff" : ""}`} aria-label="Quick navigation">
+        {(basePath === "/staff"
+          ? staffSections
+          : tenantSections.filter((item) => ["dashboard", "pos", "inventory", "reports"].includes(item.slug))
+        ).map((item) => (
+          <a className={current === item.slug ? "active" : ""} href={item.href} key={item.slug}>
+            <PortalIcon name={item.icon} /><span>{item.label === "Point of Sale" ? "POS" : item.label}</span>
+          </a>
+        ))}
+        <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open full navigation">
+          <PortalIcon name="menu" /><span>More</span>
+        </button>
+      </nav>
     </div>
   );
 }

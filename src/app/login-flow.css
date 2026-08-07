@@ -1,1 +1,46 @@
-.tenant-login-card{position:relative}.tenant-login-help{margin:0;color:#8da99d;font-size:.88rem;line-height:1.55}.tenant-password-field{display:grid;grid-template-columns:1fr auto;gap:8px}.tenant-password-field input{min-width:0}.tenant-password-toggle{min-width:72px;border-color:#31594c;background:#102b22;color:#dff5eb}.tenant-password-toggle:hover{background:#173a2e}.tenant-login-submit{min-height:48px}.tenant-login-submit:disabled,.tenant-password-toggle:disabled{cursor:not-allowed;opacity:.68}.login-error,.form-error{margin:0;padding:11px 13px;border:1px solid #7d3434;border-radius:10px;background:#341919;color:#ffd7d7;font-size:.84rem;line-height:1.45}.login-status{margin:0;padding:11px 13px;border:1px solid #286749;border-radius:10px;background:#102f24;color:#b9f3d8;font-size:.84rem;line-height:1.45}.tenant-login-note{display:block;color:#78988b;line-height:1.5}@media(max-width:520px){.tenant-password-field{grid-template-columns:1fr}.tenant-password-toggle{width:100%}}
+.tenant-auth{background-image:linear-gradient(90deg,rgba(4,17,13,.9) 0%,rgba(4,17,13,.48) 55%,rgba(4,17,13,.86) 100%),url("/images/admin-login-background.jpg");background-position:center;background-repeat:no-repeat;background-size:cover}.tenant-auth .auth-copy{background:radial-gradient(circle at 30% 30%,rgba(21,81,61,.7),transparent 58%);text-shadow:0 2px 20px rgba(0,0,0,.55)}.tenant-auth .login-card{border-color:rgba(115,233,182,.28);background:rgba(7,24,18,.92);box-shadow:0 28px 70px rgba(0,0,0,.45);backdrop-filter:blur(12px)}.tenant-login-card{position:relative}.tenant-login-help{margin:0;color:#8da99d;font-size:.88rem;line-height:1.55}.tenant-password-field{display:grid;grid-template-columns:1fr auto;gap:8px}.tenant-password-field input{min-width:0}.tenant-password-toggle{display:grid;place-items:center;min-width:48px;padding:0;border-color:#31594c;background:#102b22;color:#dff5eb}.tenant-password-toggle svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.tenant-password-toggle:hover{background:#173a2e}.tenant-login-submit{min-height:48px}.tenant-login-submit:disabled,.tenant-password-toggle:disabled{cursor:not-allowed;opacity:.68}.login-error,.form-error{margin:0;padding:11px 13px;border:1px solid #7d3434;border-radius:10px;background:#341919;color:#ffd7d7;font-size:.84rem;line-height:1.45}.login-status{margin:0;padding:11px 13px;border:1px solid #286749;border-radius:10px;background:#102f24;color:#b9f3d8;font-size:.84rem;line-height:1.45}.tenant-login-switch{color:#78988b;font-size:.84rem;line-height:1.5;text-align:center}.tenant-login-switch a{color:#73e9b6;font-weight:700;text-decoration:none}.tenant-login-switch a:hover{text-decoration:underline}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}@media(max-width:720px){.tenant-auth{background-image:linear-gradient(rgba(4,17,13,.72),rgba(4,17,13,.9)),url("/images/admin-login-background.jpg");background-position:58% center}.tenant-auth .login-card{background:rgba(7,24,18,.9)}}@media(max-width:520px){.tenant-password-field{grid-template-columns:1fr}.tenant-password-toggle{width:100%}}
+
+
+/* Compact dark login card shared by administrator and staff portals. */
+.tenant-auth{background-color:#0d0f13;background-image:linear-gradient(90deg,rgba(9,11,15,.9),rgba(9,11,15,.42)),url("/images/admin-login-background.jpg")}
+.tenant-auth .auth-copy{background:radial-gradient(circle at 30% 30%,rgba(75,84,98,.45),transparent 58%)}
+.tenant-auth .login-card{width:min(420px,calc(100% - 32px));gap:14px;padding:30px;border:1px solid rgba(184,190,201,.24);border-radius:18px;background:rgba(18,20,25,.94);box-shadow:0 24px 70px rgba(0,0,0,.48);backdrop-filter:blur(16px)}
+.tenant-login-card .eyebrow{margin:0;text-align:center;color:#c5a77b;font-size:.7rem;letter-spacing:.14em}
+.tenant-login-card h2{margin:0;text-align:center;color:#f2f2f3;font-size:1.85rem;font-weight:500;letter-spacing:-.03em}
+.tenant-login-help{margin:-4px 0 8px;text-align:center;color:#8d919b;font-size:.78rem;line-height:1.45}
+.tenant-login-card label{gap:6px;color:#e0e1e4;font-size:.72rem}
+.tenant-login-card input{padding:14px 13px;border-color:#363941;border-radius:9px;background:#25272d;color:#f4f4f5;font-size:.86rem}
+.tenant-login-card input::placeholder{color:#7e828c}
+.tenant-login-card input:focus{border-color:#b59b73;outline:2px solid rgba(181,155,115,.2)}
+.tenant-password-field{grid-template-columns:minmax(0,1fr) 48px;gap:7px}
+.tenant-password-toggle{min-width:48px;border-color:#363941!important;background:#25272d!important;color:#bfc2ca!important}
+.tenant-password-toggle:hover{background:#30333a!important}
+.tenant-login-forgot{margin:-4px 2px 4px;text-align:right;color:#bda47d;font-size:.72rem}
+.tenant-login-submit{min-height:46px;margin-top:2px;border:1px solid rgba(197,167,123,.28)!important;border-radius:9px!important;background:linear-gradient(100deg,#2a3037 0%,#b49a70 100%)!important;color:#f8f7f5!important;font-weight:500!important}
+.tenant-login-submit:hover{filter:brightness(1.08)}
+.tenant-login-switch{margin-top:3px;color:#858993;font-size:.72rem}.tenant-login-switch a{color:#c6a97c}
+.tenant-auth .login-status,.tenant-auth .login-error{font-size:.75rem}
+@media(max-width:720px){.tenant-auth{background-image:linear-gradient(rgba(9,11,15,.72),rgba(9,11,15,.92)),url("/images/admin-login-background.jpg")}.tenant-auth .login-card{width:min(420px,calc(100% - 32px));padding:27px 22px}}
+@media(max-width:520px){.tenant-password-field{grid-template-columns:minmax(0,1fr) 48px}.tenant-password-toggle{width:48px}}
+
+
+/* Keep the password eye inside the same input bar. */
+.tenant-password-field{position:relative;display:block}
+.tenant-password-field input{width:100%;padding-right:54px}
+.tenant-password-toggle{position:absolute;top:50%;right:7px;z-index:1;width:36px;height:36px;min-width:36px;transform:translateY(-50%);border:0!important;border-radius:7px!important;background:transparent!important;color:#bfc2ca!important}
+.tenant-password-toggle:hover{background:rgba(255,255,255,.08)!important}
+@media(max-width:520px){.tenant-password-field{display:block}.tenant-password-toggle{width:36px;min-width:36px}}
+
+
+/* Login controls: unobtrusive eye toggle and recovery notice. */
+.tenant-password-toggle,.tenant-password-toggle:hover{background:transparent!important;border:0!important;box-shadow:none!important;color:#c3c7cf!important}
+.tenant-password-toggle svg{overflow:visible}
+.tenant-login-forgot{display:block;width:max-content;justify-self:end;margin:-4px 2px 4px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:#bda47d!important;font:inherit;font-size:.72rem;font-weight:400;text-align:right}
+.tenant-login-forgot:hover{background:transparent!important;color:#e0c897!important;text-decoration:underline}
+.tenant-recovery-notice{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid rgba(197,167,123,.35);border-radius:9px;background:rgba(181,155,115,.12);color:#ead8b6;font-size:.74rem;line-height:1.45}
+.tenant-recovery-notice button{flex:0 0 auto;width:24px!important;height:24px!important;padding:0!important;border:0!important;background:transparent!important;color:#ead8b6!important;font-size:1.1rem;line-height:1}
+
+
+/* Neutralize shared primary-button styling on login utility controls. */
+.tenant-auth .login-card .tenant-password-toggle,.tenant-auth .login-card .tenant-password-toggle:hover{background:transparent!important;border-color:transparent!important;color:#c3c7cf!important}
+.tenant-auth .login-card .tenant-login-forgot,.tenant-auth .login-card .tenant-login-forgot:hover{background:transparent!important;border-color:transparent!important;color:#aeb3bd!important}

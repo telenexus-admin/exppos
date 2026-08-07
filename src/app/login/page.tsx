@@ -8,13 +8,13 @@ export default async function Login({
   const query = await searchParams;
 
   return (
-    <main className="auth">
+    <main className="auth tenant-auth">
       <section className="auth-copy">
         <a className="brand" href="/">Speedyhive<span>Cloud POS</span></a>
         <h1>Run every branch with clarity.</h1>
         <p>Sales, stock, staff and financial controls in one secure workspace.</p>
       </section>
-      <TenantLoginForm switching={query.switch === "1"} />
+      <TenantLoginForm switching={query.switch === "1"} mode="admin" />
     </main>
   );
 }

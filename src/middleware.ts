@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
+import { publicUrl } from "@/server/public-url";
 
 const secret = () => new TextEncoder().encode(process.env.AUTH_SECRET);
 
@@ -19,23 +20,24 @@ export async function middleware(req: NextRequest) {
   if (pathname.startsWith("/operator/") && pathname !== "/operator/login") {
     const authenticated = await validSession(req.cookies.get("operator_session")?.value, "operator");
     if (!authenticated) {
-      const login = new URL("/operator/login", req.url);
+      const login = publicUrl("/operator/login", req);
       login.searchParams.set("next", pathname);
       return NextResponse.redirect(login);
     }
   }
 
-  const tenantPage = pathname === "/app" || pathname.startsWith("/app/") || pathname === "/staff" || pathname.startsWith("/staff/");
+  const isPublicTenantLogin = pathname === "/login" || pathname === "/staff/login";
+  const tenantPage = !isPublicTenantLogin && (pathname === "/app" || pathname.startsWith("/app/") || pathname === "/staff" || pathname.startsWith("/staff/"));
   if (tenantPage) {
     const authenticated = await validSession(req.cookies.get("tenant_session")?.value, "tenant");
     if (!authenticated) {
       if (req.cookies.get("tenant_refresh")?.value) {
-        const refresh = new URL("/api/v1/auth/refresh", req.url);
+        const refresh = publicUrl("/api/v1/auth/refresh", req);
         refresh.searchParams.set("next", `${pathname}${req.nextUrl.search}`);
         return NextResponse.redirect(refresh);
       }
 
-      const login = new URL("/login", req.url);
+      const login = publicUrl("/login", req);
       login.searchParams.set("next", pathname);
       login.searchParams.set("reason", "session-expired");
       return NextResponse.redirect(login);
