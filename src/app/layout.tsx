@@ -20,6 +20,7 @@ import "./customer-management.css";
 import "./report-analytics.css";
 import "./expense-management.css";
 import "./pwa-install.css";
+import "./operator-access.css";
 import "./mobile-app.css";
 import { TenantAccountMount } from "@/components/tenant-account-mount";
 import { PwaRegister } from "@/components/pwa-register";
