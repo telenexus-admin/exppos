@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { isDashboardManagerRoleCode } from "@/lib/dashboard-access";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { apiError } from "@/server/http";
@@ -82,9 +83,6 @@ function mergeCandidates(...groups: LoginCandidate[][]) {
 
 async function matchingPasswordCandidates(candidates: LoginCandidate[], password: string) {
   const matches: LoginCandidate[] = [];
-
-  // Password hashes use memory-hard Argon2. Check sequentially so a duplicated legacy
-  // username cannot cause many expensive verifications to run in parallel.
   for (const candidate of candidates) {
     try {
       if (await verifySecret(candidate.passwordHash, password)) matches.push(candidate);
@@ -92,15 +90,12 @@ async function matchingPasswordCandidates(candidates: LoginCandidate[], password
       console.error("Password verification failed", { userId: candidate.id, error });
     }
   }
-
   return matches;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.AUTH_SECRET) {
-      throw new AppError("AUTH_NOT_CONFIGURED", "Login is temporarily unavailable. Contact support.", 503);
-    }
+    if (!process.env.AUTH_SECRET) throw new AppError("AUTH_NOT_CONFIGURED", "Login is temporarily unavailable. Contact support.", 503);
 
     const body = schema.parse(await req.json());
     const rawIdentifier = body.identifier.trim();
@@ -109,16 +104,10 @@ export async function POST(req: NextRequest) {
     const identifierHash = loginAttemptHash(rawIdentifier);
 
     const recentFailures = await db.loginAttempt.count({
-      where: {
-        identifierHash,
-        createdAt: { gt: new Date(Date.now() - 15 * 60_000) },
-        succeeded: false,
-      },
+      where: { identifierHash, createdAt: { gt: new Date(Date.now() - 15 * 60_000) }, succeeded: false },
     });
     const defaultSecurity = normalizeTenantSettings(undefined).securityNotifications;
-    if (recentFailures >= defaultSecurity.failedLoginLimit) {
-      throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
-    }
+    if (recentFailures >= defaultSecurity.failedLoginLimit) throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
 
     const [directCandidates, businessEmailAdminCandidates] = await Promise.all([
       db.user.findMany({
@@ -137,10 +126,7 @@ export async function POST(req: NextRequest) {
       db.user.findMany({
         where: {
           status: "ACTIVE",
-          tenant: {
-            status: { in: [...activeTenantStatuses] },
-            email: { equals: normalizedIdentifier, mode: "insensitive" },
-          },
+          tenant: { status: { in: [...activeTenantStatuses] }, email: { equals: normalizedIdentifier, mode: "insensitive" } },
           roles: { some: { role: { code: "TENANT_ADMIN" } } },
         },
         include: userInclude,
@@ -150,44 +136,29 @@ export async function POST(req: NextRequest) {
 
     const candidates = mergeCandidates(directCandidates, businessEmailAdminCandidates);
     const failedLoginLimit = candidates.length > 0
-      ? Math.min(
-          defaultSecurity.failedLoginLimit,
-          ...candidates.map((candidate) => normalizeTenantSettings(candidate.tenant.settings?.metadata).securityNotifications.failedLoginLimit),
-        )
+      ? Math.min(defaultSecurity.failedLoginLimit, ...candidates.map((candidate) => normalizeTenantSettings(candidate.tenant.settings?.metadata).securityNotifications.failedLoginLimit))
       : defaultSecurity.failedLoginLimit;
-    if (recentFailures >= failedLoginLimit) {
-      throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
-    }
+    if (recentFailures >= failedLoginLimit) throw new AppError("RATE_LIMITED", "Too many failed attempts. Wait 15 minutes and try again.", 429);
 
     const matches = await matchingPasswordCandidates(candidates, body.password);
-
     if (matches.length === 0) {
       await recordLoginAttempt({ tenantKey: "global", identifierHash, ipAddress, succeeded: false });
       throw new AppError("INVALID_CREDENTIALS", "Incorrect username, email, phone number, or password", 401);
     }
     if (matches.length > 1) {
       await recordLoginAttempt({ tenantKey: "ambiguous", identifierHash, ipAddress, succeeded: false });
-      throw new AppError(
-        "AMBIGUOUS_IDENTIFIER",
-        "These credentials match more than one business account. Use a unique email address or phone number, or ask an administrator to change the duplicate username.",
-        409,
-      );
+      throw new AppError("AMBIGUOUS_IDENTIFIER", "These credentials match more than one business account. Use a unique email address or phone number, or ask an administrator to change the duplicate username.", 409);
     }
 
     const user = matches[0];
     const security = normalizeTenantSettings(user.tenant.settings?.metadata).securityNotifications;
     const tenantRoles = user.roles.filter((userRole) => userRole.role.tenantId === user.tenantId);
     const roleCodes = tenantRoles.map((userRole) => userRole.role.code);
-    if (roleCodes.length === 0) {
-      throw new AppError("ACCOUNT_NOT_READY", "This account has no role assigned. Ask the administrator or operator to update it.", 409);
-    }
-    const isAdmin = roleCodes.includes("TENANT_ADMIN");
-    if (body.portal === "admin" && !isAdmin) {
-      throw new AppError("WRONG_LOGIN_PORTAL", "This is a staff account. Use the staff login page.", 403);
-    }
-    if (body.portal === "staff" && isAdmin) {
-      throw new AppError("WRONG_LOGIN_PORTAL", "This is an administrator account. Use the admin login page.", 403);
-    }
+    if (roleCodes.length === 0) throw new AppError("ACCOUNT_NOT_READY", "This account has no role assigned. Ask the administrator or operator to update it.", 409);
+
+    const usesAdminDashboard = roleCodes.includes("TENANT_ADMIN") || roleCodes.some(isDashboardManagerRoleCode);
+    if (body.portal === "admin" && !usesAdminDashboard) throw new AppError("WRONG_LOGIN_PORTAL", "This is a staff account. Use the staff login page.", 403);
+    if (body.portal === "staff" && usesAdminDashboard) throw new AppError("WRONG_LOGIN_PORTAL", "This account uses the business dashboard. Use the admin login page.", 403);
 
     const permissions = new Set(
       tenantRoles.flatMap((userRole) => userRole.role.rolePermissions.map((rolePermission) => rolePermission.permission.code as Permission)),
@@ -205,22 +176,12 @@ export async function POST(req: NextRequest) {
 
     try {
       await db.$transaction([
-        db.userSession.create({
-          data: {
-            userId: user.id,
-            refreshTokenHash: refresh.hash,
-            ipAddress,
-            deviceInfo: req.headers.get("user-agent"),
-            expiresAt: new Date(Date.now() + 30 * 86400_000),
-          },
-        }),
+        db.userSession.create({ data: { userId: user.id, refreshTokenHash: refresh.hash, ipAddress, deviceInfo: req.headers.get("user-agent"), expiresAt: new Date(Date.now() + 30 * 86400_000) } }),
         db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }),
       ]);
     } catch (error) {
       console.error("Login session creation failed", { userId: user.id, error });
-      if (isKnownPrismaError(error) && error.code === "P2028") {
-        throw new AppError("LOGIN_TIMEOUT", "The server took too long to open your session. Try again.", 503);
-      }
+      if (isKnownPrismaError(error) && error.code === "P2028") throw new AppError("LOGIN_TIMEOUT", "The server took too long to open your session. Try again.", 503);
       throw new AppError("SESSION_CREATE_FAILED", "Your credentials are correct, but the session could not be opened. Try again.", 503);
     }
 
@@ -236,27 +197,9 @@ export async function POST(req: NextRequest) {
     const forwardedProtocol = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
     const secure = forwardedProtocol === "https" || req.nextUrl.protocol === "https:" || process.env.APP_URL?.startsWith("https://") === true;
     response.headers.set("Cache-Control", "no-store, private");
-    response.cookies.set("tenant_session", accessToken, {
-      httpOnly: true,
-      secure,
-      sameSite: "lax",
-      path: "/",
-      maxAge: security.sessionTimeoutMinutes * 60,
-    });
-    response.cookies.set("tenant_refresh", refresh.raw, {
-      httpOnly: true,
-      secure,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 30 * 86400,
-    });
-    response.cookies.set("tenant_refresh", "", {
-      httpOnly: true,
-      secure,
-      sameSite: "lax",
-      path: "/api/v1/auth",
-      expires: new Date(0),
-    });
+    response.cookies.set("tenant_session", accessToken, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: security.sessionTimeoutMinutes * 60 });
+    response.cookies.set("tenant_refresh", refresh.raw, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 30 * 86400 });
+    response.cookies.set("tenant_refresh", "", { httpOnly: true, secure, sameSite: "lax", path: "/api/v1/auth", expires: new Date(0) });
     return response;
   } catch (error) {
     return apiError(error);
