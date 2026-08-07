@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import {
   dashboardManagerRoleCode,
@@ -78,7 +79,7 @@ export async function provisionDashboardAccount(
     role = await tx.role.create({
       data: {
         tenantId: input.tenantId,
-        code: dashboardManagerRoleCode(username),
+        code: dashboardManagerRoleCode(`${username}_${randomUUID().slice(0, 8)}`),
         name: `Branch Manager — ${input.fullName}`,
         isSystem: false,
       },
