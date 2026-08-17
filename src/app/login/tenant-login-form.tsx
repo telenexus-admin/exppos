@@ -23,7 +23,6 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [forgotNotice, setForgotNotice] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,27 +164,12 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
         </span>
       </label>
 
-      <button className="tenant-login-forgot" type="button" onClick={() => setForgotNotice(true)}>Forgot Password?</button>
-
-      {forgotNotice && (
-        <div className="tenant-recovery-notice" role="alert">
-          <span>Password recovery not available at the moment contact our support team on 0724657480 for further assistance</span>
-          <button type="button" aria-label="Close password recovery notice" onClick={() => setForgotNotice(false)}>×</button>
-        </div>
-      )}
-
       {error && <p className="form-error login-error" role="alert">{error}</p>}
       {status && <p className="login-status" role="status" aria-live="polite">{status}</p>}
 
       <button className="primary tenant-login-submit" type="submit" disabled={loading}>
         {loading ? "Signing in…" : "Sign In"}
       </button>
-
-      {mode === "admin" && (
-        <div className="tenant-login-switch" role="navigation" aria-label="Login type">
-          <span>Staff member? <a href="/staff/login">Staff login</a></span>
-        </div>
-      )}
     </form>
   );
 }

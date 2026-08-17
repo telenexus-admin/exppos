@@ -91,6 +91,7 @@ const salesNewUntil = Date.parse("2026-07-26T23:59:59Z");
 const staffSections: NavigationItem[] = [
   { label: "My Dashboard", slug: "dashboard", href: "/staff/dashboard", icon: "dashboard" },
   { label: "Point of Sale", slug: "pos", href: "/app/pos", icon: "cart" },
+  { label: "Settings", slug: "settings", href: "/staff/settings", icon: "settings" },
 ];
 
 function PortalIcon({ name }: { name: IconName }) {

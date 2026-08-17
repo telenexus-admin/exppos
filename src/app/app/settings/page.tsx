@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
+import { ChangePasswordForm } from "@/components/change-password-form";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { requirePermission } from "@/server/security/context";
@@ -62,6 +63,9 @@ export default async function SettingsPage() {
         <span>Changes on this page apply only to {tenant.name}. They do not affect any other POS client.</span>
       </div>
       <SettingsForm initial={initial} />
+      <div style={{ marginTop: 18 }}>
+        <ChangePasswordForm loginPath="/login" />
+      </div>
     </PortalShell>
   );
 }
