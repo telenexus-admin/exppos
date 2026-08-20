@@ -1,0 +1,11 @@
+/* The mobile quick-navigation is rendered after workspace content in PortalShell.
+   On desktop, the generic `.portal nav { display:grid }` rule has greater
+   specificity than `.portal-mobile-nav { display:none }`, so the mobile nav
+   can appear as an oversized active icon after scrolling to the page bottom.
+   Keep it completely out of desktop layout while preserving the mobile rules. */
+@media (min-width: 821px) {
+  .portal .portal-mobile-nav {
+    display: none !important;
+    margin: 0 !important;
+  }
+}
