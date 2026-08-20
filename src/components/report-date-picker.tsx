@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function ReportDatePicker({ selectedDate, activeView }: { selectedDate: string; activeView: string }) {
+export function ReportDatePicker({ selectedDate, activeView }: { selectedDate: string; activeView?: string }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -12,7 +12,7 @@ export function ReportDatePicker({ selectedDate, activeView }: { selectedDate: s
     const params = new URLSearchParams();
     params.set("period", "daily");
     params.set("date", value);
-    if (activeView !== "dashboard") params.set("view", activeView);
+    if (activeView && activeView !== "dashboard") params.set("view", activeView);
     setLoading(true);
     router.push(`/app/reports?${params.toString()}`);
   }
