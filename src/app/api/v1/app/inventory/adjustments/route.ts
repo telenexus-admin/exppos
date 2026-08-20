@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { appendAudit } from "@/server/audit/audit";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { apiError, tenantContext } from "@/server/http";
 import { requirePermission } from "@/server/security/context";
 import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
@@ -22,6 +23,7 @@ const schema = z.object({
   reorderLevel: optionalNonNegativeNumber,
   sellingPrice: optionalNonNegativeNumber,
   reason: z.string().trim().max(240).optional().default(""),
+  allocateToBranch: z.boolean().optional().default(false),
 });
 
 type AdjustmentResult = {
@@ -38,6 +40,7 @@ type AdjustmentResult = {
   sellingPrice: string;
   reason: string;
   mode: "set" | "add" | "remove";
+  allocatedToBranch: boolean;
 };
 
 function isKnownPrismaError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
@@ -51,6 +54,11 @@ export async function POST(req: NextRequest) {
 
     const body = schema.parse(await req.json());
     if (body.sellingPrice !== undefined) requirePermission(ctx, "product.update");
+
+    const scope = await resolveTenantAccessScope(db, ctx);
+    if (!scope.branchIds.includes(body.branchId)) {
+      throw new AppError("BRANCH_FORBIDDEN", "You cannot adjust inventory for this branch", 403);
+    }
 
     const tenantSetting = await db.tenantSetting.findUnique({
       where: { tenantId: ctx.tenantId },
@@ -95,6 +103,14 @@ export async function POST(req: NextRequest) {
           },
         },
       });
+
+      if (!existing && !body.allocateToBranch) {
+        throw new AppError(
+          "PRODUCT_NOT_IN_BRANCH",
+          `${product.name} is not currently allocated to ${branch.name}. Select a product from that branch or explicitly allocate it first.`,
+          409,
+        );
+      }
 
       const previousQuantity = existing?.quantity ?? new Prisma.Decimal(0);
       const reorderLevel = body.reorderLevel === undefined
@@ -150,7 +166,7 @@ export async function POST(req: NextRequest) {
             tenantId: ctx.tenantId,
             branchId: branch.id,
             productId: product.id,
-            type: `manual_${body.mode}`,
+            type: existing ? `manual_${body.mode}` : "branch_allocation",
             quantity: delta,
             referenceType: "inventory_adjustment",
             referenceId: randomUUID(),
@@ -173,12 +189,13 @@ export async function POST(req: NextRequest) {
         sellingPrice: sellingPrice.toString(),
         reason: reason || "Reason not required by business settings",
         mode: body.mode,
+        allocatedToBranch: !existing,
       };
     }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 20_000 });
 
     try {
       await appendAudit(db, ctx, {
-        action: "inventory.adjusted",
+        action: result.allocatedToBranch ? "inventory.product_allocated" : "inventory.adjusted",
         entityType: "branch_inventory",
         entityId: result.inventoryId,
         branchId: result.branchId,
@@ -193,6 +210,7 @@ export async function POST(req: NextRequest) {
           sellingPrice: result.sellingPrice,
           productId: result.productId,
           mode: result.mode,
+          allocatedToBranch: result.allocatedToBranch,
         },
         reason: result.reason,
         ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim(),
