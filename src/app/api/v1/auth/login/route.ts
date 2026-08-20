@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
       tenantRoles.flatMap((userRole) => userRole.role.rolePermissions.map((rolePermission) => rolePermission.permission.code as Permission)),
     );
 
-    if (body.portal === "admin" && usesAdminDashboard && adminOtpEnabled()) {
+    if (body.portal === "admin" && usesAdminDashboard && adminOtpEnabled() && user.emailOtp2faEnabled) {
       if (!isDeliverableAdminEmail(user.email)) {
         throw new AppError(
           "ADMIN_OTP_EMAIL_REQUIRED",

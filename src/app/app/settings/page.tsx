@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
 import { ChangePasswordForm } from "@/components/change-password-form";
+import { TwoFactorAuthForm } from "@/components/two-factor-auth-form";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { requirePermission } from "@/server/security/context";
@@ -47,6 +48,10 @@ export default async function SettingsPage() {
     metadata,
   };
   const roleLabel = viewer.roles.map(({ role }) => role.name).join(", ") || "Tenant administrator";
+  const isTenantAdmin = viewer.roles.some(({ role }) => role.code === "TENANT_ADMIN");
+  const emailOtpAvailable = process.env.ADMIN_OTP_ENABLED?.trim().toLowerCase() === "true"
+    && Boolean(process.env.RESEND_API_KEY?.trim())
+    && Boolean(process.env.RESEND_FROM_EMAIL?.trim());
 
   return (
     <PortalShell title="Settings" role={roleLabel} current="settings" branchName={tenant.name}>
@@ -66,6 +71,15 @@ export default async function SettingsPage() {
       <div style={{ marginTop: 18 }}>
         <ChangePasswordForm loginPath="/login" />
       </div>
+      {isTenantAdmin && (
+        <div style={{ marginTop: 18 }}>
+          <TwoFactorAuthForm
+            initialEnabled={viewer.emailOtp2faEnabled}
+            email={viewer.email}
+            available={emailOtpAvailable}
+          />
+        </div>
+      )}
     </PortalShell>
   );
 }

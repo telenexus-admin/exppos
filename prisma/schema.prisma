@@ -85,7 +85,7 @@ model Tenant {
   customers           Customer[]
   suppliers           Supplier[]
   categories          Category[]
-  products            Product[]
+  products             Product[]
   inventories         BranchInventory[]
   stockMovements      StockMovement[]
   shifts              Shift[]
@@ -146,36 +146,37 @@ model Branch {
 }
 
 model User {
-  id                  String                 @id @default(cuid())
-  tenantId            String
-  tenant              Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  staffNumber         String
-  fullName            String
-  email               String
-  phone               String?
-  passwordHash        String
-  pinHash             String?
-  status              UserStatus             @default(ACTIVE)
-  forcePasswordChange Boolean                @default(true)
-  lastLoginAt         DateTime?
-  roles               UserRole[]
-  branches            UserBranchAssignment[]
-  sessions            UserSession[]
-  shifts              Shift[]
-  sales               Sale[]
-  processedReturns    SaleReturn[]      @relation("ReturnProcessedBy")
-  approvedReturns     SaleReturn[]      @relation("ReturnApprovedBy")
-  quotations          Quotation[]
-  createdPromotions   Promotion[]       @relation("PromotionCreatedBy")
-  approvedPromotions  Promotion[]       @relation("PromotionApprovedBy")
-  registerSessions    RegisterSession[] @relation("RegisterOpenedBy")
-  closedSessions      RegisterSession[] @relation("RegisterClosedBy")
-  cashMovements       CashMovement[]    @relation("CashMovementCreatedBy")
-  approvedCashMoves   CashMovement[]    @relation("CashMovementApprovedBy")
-  processedRefunds    Refund[]          @relation("RefundProcessedBy")
-  saleDrafts          SaleDraft[]
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
+  id                    String                 @id @default(cuid())
+  tenantId              String
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  staffNumber           String
+  fullName              String
+  email                 String
+  phone                 String?
+  passwordHash          String
+  pinHash               String?
+  status                UserStatus             @default(ACTIVE)
+  forcePasswordChange   Boolean                @default(true)
+  emailOtp2faEnabled    Boolean                @default(false)
+  lastLoginAt           DateTime?
+  roles                 UserRole[]
+  branches              UserBranchAssignment[]
+  sessions              UserSession[]
+  shifts                Shift[]
+  sales                 Sale[]
+  processedReturns      SaleReturn[]      @relation("ReturnProcessedBy")
+  approvedReturns       SaleReturn[]      @relation("ReturnApprovedBy")
+  quotations            Quotation[]
+  createdPromotions     Promotion[]       @relation("PromotionCreatedBy")
+  approvedPromotions    Promotion[]       @relation("PromotionApprovedBy")
+  registerSessions      RegisterSession[] @relation("RegisterOpenedBy")
+  closedSessions        RegisterSession[] @relation("RegisterClosedBy")
+  cashMovements         CashMovement[]    @relation("CashMovementCreatedBy")
+  approvedCashMoves     CashMovement[]    @relation("CashMovementApprovedBy")
+  processedRefunds      Refund[]          @relation("RefundProcessedBy")
+  saleDrafts            SaleDraft[]
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
   @@unique([tenantId, staffNumber])
   @@unique([tenantId, email])
@@ -873,7 +874,7 @@ model RegisterSession {
   openingBalance Decimal      @db.Decimal(18, 2)
   closingBalance Decimal?     @db.Decimal(18, 2)
   countedBalance Decimal?     @db.Decimal(18, 2)
-  difference     Decimal?      @db.Decimal(18, 2)
+  difference     Decimal?     @db.Decimal(18, 2)
   notes          String?
   openedAt       DateTime     @default(now())
   closedAt       DateTime?
