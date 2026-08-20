@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
+import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
 import { requirePermission } from "@/server/security/context";
 import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 import { InventoryManager } from "./inventory-manager";
@@ -17,6 +18,7 @@ export default async function InventoryPage({
   requirePermission(session, "inventory.view");
   const query = await searchParams;
   const stockFilter = query.stock === "out" || query.stock === "low" ? query.stock : null;
+  const scope = await resolveTenantAccessScope(db, session);
 
   const [viewer, tenant, branches, products, inventory] = await Promise.all([
     db.user.findFirst({
@@ -25,7 +27,7 @@ export default async function InventoryPage({
     }),
     db.tenant.findUnique({ where: { id: session.tenantId }, include: { settings: true } }),
     db.branch.findMany({
-      where: { tenantId: session.tenantId, status: "ACTIVE" },
+      where: { tenantId: session.tenantId, id: { in: scope.branchIds }, status: "ACTIVE" },
       select: { id: true, name: true, code: true },
       orderBy: [{ isHeadOffice: "desc" }, { name: "asc" }],
     }),
@@ -37,6 +39,7 @@ export default async function InventoryPage({
     db.branchInventory.findMany({
       where: {
         tenantId: session.tenantId,
+        branchId: { in: scope.branchIds },
         branch: { tenantId: session.tenantId, status: "ACTIVE" },
         product: { tenantId: session.tenantId, status: "active" },
       },
@@ -65,6 +68,13 @@ export default async function InventoryPage({
       : inventory;
   const filterLabel = stockFilter === "out" ? "Out-of-stock items" : stockFilter === "low" ? "Low-stock items" : "Inventory register";
   const canEditProducts = session.permissions.has("product.update");
+  const branchIdsByProduct = new Map<string, string[]>();
+  for (const row of inventory) {
+    const branchIds = branchIdsByProduct.get(row.productId) ?? [];
+    branchIds.push(row.branchId);
+    branchIdsByProduct.set(row.productId, branchIds);
+  }
+  const stockProductCount = new Set(trackedRows.map((row) => row.productId)).size;
 
   return (
     <PortalShell title="Inventory" role={roleLabel} current="inventory" branchName={tenant.name}>
@@ -72,10 +82,14 @@ export default async function InventoryPage({
         <div>
           <small>LIVE BRANCH INVENTORY</small>
           <h3>Stock levels, selling prices and adjustments</h3>
-          <p>Use Adjust stock to change quantity, branch, reorder level, and—when permitted—the product selling price.</p>
+          <p>Choose a branch first when adjusting stock. Products are filtered to that branch so one location&apos;s stock cannot be confused with another.</p>
         </div>
         <InventoryManager
-          products={products.map((product) => ({ ...product, sellingPrice: Number(product.sellingPrice) }))}
+          products={products.map((product) => ({
+            ...product,
+            sellingPrice: Number(product.sellingPrice),
+            branchIds: branchIdsByProduct.get(product.id) ?? [],
+          }))}
           branches={branches}
           canAdjust={session.permissions.has("inventory.adjust")}
           canUpdatePrice={canEditProducts}
@@ -85,15 +99,15 @@ export default async function InventoryPage({
       </section>
 
       <section className="catalog-summary-grid">
-        <a className={`catalog-summary-link${!stockFilter ? " active" : ""}`} href="/app/inventory"><small>Stock products</small><strong>{products.filter((product) => product.trackStock).length}</strong><span>View all inventory</span></a>
-        <a className="catalog-summary-link" href="/app/inventory"><small>Total units</small><strong>{totalUnits.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><span>Across active branches</span></a>
+        <a className={`catalog-summary-link${!stockFilter ? " active" : ""}`} href="/app/inventory"><small>Stock products</small><strong>{stockProductCount}</strong><span>Across accessible branches</span></a>
+        <a className="catalog-summary-link" href="/app/inventory"><small>Total units</small><strong>{totalUnits.toLocaleString("en-KE", { maximumFractionDigits: 3 })}</strong><span>Across accessible branches</span></a>
         <a className={`catalog-summary-link${stockFilter === "low" ? " active" : ""}`} href={settings.inventory.lowStockAlerts ? "/app/inventory?stock=low" : "/app/settings#inventory-rules"}><small>Low stock</small><strong>{lowStockRows.length}</strong><span>{settings.inventory.lowStockAlerts ? "Press to view low stock" : "Enable alerts in Settings"}</span></a>
         <a className={`catalog-summary-link${stockFilter === "out" ? " active" : ""}`} href="/app/inventory?stock=out"><small>Out of stock</small><strong>{outOfStockRows.length}</strong><span>Press to view affected products</span></a>
       </section>
 
       <article className="panel catalog-data-panel">
         <div className="catalog-panel-heading">
-          <div><small>BRANCH BALANCES</small><h3>{filterLabel}</h3><p>{canEditProducts ? "Click a row for full product editing, or use Adjust stock to update quantity and selling price." : "Every row is tenant-scoped and tied to one product and one branch."}</p></div>
+          <div><small>BRANCH BALANCES</small><h3>{filterLabel}</h3><p>{canEditProducts ? "Click a row for full product editing, or use Adjust stock to update the selected branch balance." : "Every row is tenant-scoped and tied to one product and one branch."}</p></div>
           <span>{filteredInventory.length} allocation{filteredInventory.length === 1 ? "" : "s"}</span>
         </div>
 
@@ -108,7 +122,7 @@ export default async function InventoryPage({
           <div className="catalog-empty-state">
             <span>0</span>
             <h3>{stockFilter ? `No ${stockFilter === "out" ? "out-of-stock" : "low-stock"} products` : "No stock allocations yet"}</h3>
-            <p>{stockFilter ? "No inventory records currently match this filter." : "Create a product with opening stock, or use Adjust stock to allocate an existing product to a branch."}</p>
+            <p>{stockFilter ? "No inventory records currently match this filter." : "Create a product with opening stock, or use Adjust stock and choose Allocate existing product to assign a business product to this branch."}</p>
           </div>
         ) : (
           <div className="catalog-table-wrap">
