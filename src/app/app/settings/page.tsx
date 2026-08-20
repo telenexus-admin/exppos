@@ -75,7 +75,7 @@ export default async function SettingsPage() {
         <div style={{ marginTop: 18 }}>
           <TwoFactorAuthForm
             initialEnabled={viewer.emailOtp2faEnabled}
-            email={viewer.email}
+            email={tenant.email}
             available={emailOtpAvailable}
           />
         </div>
