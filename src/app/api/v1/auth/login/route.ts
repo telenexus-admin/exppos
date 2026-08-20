@@ -1,13 +1,22 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { isDashboardManagerRoleCode } from "@/lib/dashboard-access";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { apiError } from "@/server/http";
+import { createTenantLoginSession, setTenantLoginCookies } from "@/server/auth/tenant-login-session";
+import { sendAdminLoginOtpEmail } from "@/server/notifications/admin-login-otp-email";
+import { assertAdminOtpSendAllowed, invalidateAdminOtpChallenge } from "@/server/security/admin-otp-rate-limit";
 import { verifySecret } from "@/server/security/passwords";
-import { newRefreshToken, signAccessToken } from "@/server/security/tokens";
+import {
+  ADMIN_OTP_TTL_MS,
+  adminOtpEnabled,
+  createAdminOtpChallenge,
+  isDeliverableAdminEmail,
+  maskEmail,
+} from "@/server/security/admin-otp";
 import { normalizeTenantSettings } from "@/server/settings/tenant-settings";
 import type { Permission } from "@/server/security/context";
 
@@ -64,10 +73,6 @@ async function recordLoginAttempt({ tenantKey, identifierHash, ipAddress, succee
   } catch (error) {
     console.error("Login attempt logging failed", { tenantKey, succeeded, error });
   }
-}
-
-function isKnownPrismaError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
-  return error instanceof Prisma.PrismaClientKnownRequestError;
 }
 
 function mergeCandidates(...groups: LoginCandidate[][]) {
@@ -163,27 +168,54 @@ export async function POST(req: NextRequest) {
     const permissions = new Set(
       tenantRoles.flatMap((userRole) => userRole.role.rolePermissions.map((rolePermission) => rolePermission.permission.code as Permission)),
     );
-    const requestId = randomUUID();
-    const accessToken = await signAccessToken({
-      kind: "tenant",
-      userId: user.id,
-      tenantId: user.tenantId,
-      branchIds: user.branches.map((branch) => branch.branchId),
-      permissions,
-      requestId,
-    }, security.sessionTimeoutMinutes);
-    const refresh = newRefreshToken();
 
-    try {
-      await db.$transaction([
-        db.userSession.create({ data: { userId: user.id, refreshTokenHash: refresh.hash, ipAddress, deviceInfo: req.headers.get("user-agent"), expiresAt: new Date(Date.now() + 30 * 86400_000) } }),
-        db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }),
-      ]);
-    } catch (error) {
-      console.error("Login session creation failed", { userId: user.id, error });
-      if (isKnownPrismaError(error) && error.code === "P2028") throw new AppError("LOGIN_TIMEOUT", "The server took too long to open your session. Try again.", 503);
-      throw new AppError("SESSION_CREATE_FAILED", "Your credentials are correct, but the session could not be opened. Try again.", 503);
+    if (body.portal === "admin" && usesAdminDashboard && adminOtpEnabled()) {
+      if (!isDeliverableAdminEmail(user.email)) {
+        throw new AppError(
+          "ADMIN_OTP_EMAIL_REQUIRED",
+          "This administrator account needs a real email address before OTP verification can be used. Ask the platform operator to update the account email.",
+          409,
+        );
+      }
+
+      await assertAdminOtpSendAllowed(user.id);
+      const challenge = await createAdminOtpChallenge({
+        userId: user.id,
+        tenantId: user.tenantId,
+        identifierHash,
+        ipAddress,
+        deviceInfo: req.headers.get("user-agent"),
+      });
+      try {
+        await sendAdminLoginOtpEmail({
+          to: user.email,
+          code: challenge.code,
+          fullName: user.fullName,
+          tenantName: user.tenant.name,
+          expiresMinutes: Math.round(ADMIN_OTP_TTL_MS / 60_000),
+        });
+      } catch (error) {
+        await invalidateAdminOtpChallenge(challenge.id);
+        throw error;
+      }
+
+      const response = NextResponse.json({
+        ok: true,
+        otpRequired: true,
+        challengeId: challenge.id,
+        maskedEmail: maskEmail(user.email),
+        expiresInSeconds: Math.round(ADMIN_OTP_TTL_MS / 1000),
+      }, { status: 202 });
+      response.headers.set("Cache-Control", "no-store, private");
+      return response;
     }
+
+    const session = await createTenantLoginSession({
+      req,
+      user,
+      permissions,
+      sessionTimeoutMinutes: security.sessionTimeoutMinutes,
+    });
 
     await recordLoginAttempt({ tenantKey: user.tenantId, identifierHash, ipAddress, succeeded: true });
     const destination = body.portal === "admin" ? "/app/dashboard" : "/staff/dashboard";
@@ -193,13 +225,7 @@ export async function POST(req: NextRequest) {
       forcePasswordChange: user.forcePasswordChange,
       user: { id: user.id, name: user.fullName, tenant: user.tenant.name, roles: roleCodes },
     });
-
-    const forwardedProtocol = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
-    const secure = forwardedProtocol === "https" || req.nextUrl.protocol === "https:" || process.env.APP_URL?.startsWith("https://") === true;
-    response.headers.set("Cache-Control", "no-store, private");
-    response.cookies.set("tenant_session", accessToken, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: security.sessionTimeoutMinutes * 60 });
-    response.cookies.set("tenant_refresh", refresh.raw, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 30 * 86400 });
-    response.cookies.set("tenant_refresh", "", { httpOnly: true, secure, sameSite: "lax", path: "/api/v1/auth", expires: new Date(0) });
+    setTenantLoginCookies(response, req, session, security.sessionTimeoutMinutes);
     return response;
   } catch (error) {
     return apiError(error);
