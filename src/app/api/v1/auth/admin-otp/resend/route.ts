@@ -49,14 +49,16 @@ export async function POST(req: NextRequest) {
       .map((userRole) => userRole.role.code);
     const usesAdminDashboard = roleCodes.includes("TENANT_ADMIN") || roleCodes.some(isDashboardManagerRoleCode);
     if (!usesAdminDashboard) throw new AppError("WRONG_LOGIN_PORTAL", "This account no longer has administrator dashboard access.", 403);
-    if (!isDeliverableAdminEmail(user.email)) {
-      throw new AppError("ADMIN_OTP_EMAIL_REQUIRED", "This administrator account needs a real email address before OTP verification can be used.", 409);
+
+    const verificationEmail = user.tenant.email;
+    if (!isDeliverableAdminEmail(verificationEmail)) {
+      throw new AppError("ADMIN_OTP_EMAIL_REQUIRED", "Add a real business email under Business Profile before using OTP verification.", 409);
     }
 
     const resend = await prepareAdminOtpResend(challenge.id);
     try {
       await sendAdminLoginOtpEmail({
-        to: user.email,
+        to: verificationEmail,
         code: resend.code,
         fullName: user.fullName,
         tenantName: user.tenant.name,
@@ -69,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     const response = NextResponse.json({
       ok: true,
-      maskedEmail: maskEmail(user.email),
+      maskedEmail: maskEmail(verificationEmail),
       expiresInSeconds: Math.max(0, Math.ceil((resend.challenge.expiresAt.getTime() - Date.now()) / 1000)),
       verificationWindowSeconds: Math.round(ADMIN_OTP_TTL_MS / 1000),
     });

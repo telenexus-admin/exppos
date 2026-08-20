@@ -31,9 +31,13 @@ export async function POST(req: NextRequest) {
       },
       select: {
         id: true,
-        email: true,
         passwordHash: true,
         emailOtp2faEnabled: true,
+        tenant: {
+          select: {
+            email: true,
+          },
+        },
         roles: {
           where: { role: { tenantId: ctx.tenantId } },
           select: { role: { select: { code: true } } },
@@ -59,10 +63,10 @@ export async function POST(req: NextRequest) {
           503,
         );
       }
-      if (!isDeliverableAdminEmail(user.email)) {
+      if (!isDeliverableAdminEmail(user.tenant.email)) {
         throw new AppError(
           "TWO_FACTOR_EMAIL_REQUIRED",
-          "Add a real email address to this administrator account before enabling email OTP 2FA.",
+          "Add a real business email under Business Profile before enabling email OTP 2FA.",
           409,
         );
       }
@@ -93,6 +97,7 @@ export async function POST(req: NextRequest) {
         newValues: {
           emailOtp2faEnabled: body.enabled,
           method: "EMAIL_OTP",
+          verificationEmailSource: "BUSINESS_PROFILE",
           changedAt: changedAt.toISOString(),
         },
         ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || undefined,
@@ -104,7 +109,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       enabled: body.enabled,
       message: body.enabled
-        ? "Two-factor authentication enabled. Your next admin login will require a password and email OTP."
+        ? "Two-factor authentication enabled. Your next admin login will require a password and an OTP sent to the current Business Profile email."
         : "Two-factor authentication disabled. Your next admin login will use your password only.",
     });
     response.headers.set("Cache-Control", "no-store, private");

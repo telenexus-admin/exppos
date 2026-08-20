@@ -170,10 +170,11 @@ export async function POST(req: NextRequest) {
     );
 
     if (body.portal === "admin" && usesAdminDashboard && adminOtpEnabled() && user.emailOtp2faEnabled) {
-      if (!isDeliverableAdminEmail(user.email)) {
+      const verificationEmail = user.tenant.email;
+      if (!isDeliverableAdminEmail(verificationEmail)) {
         throw new AppError(
           "ADMIN_OTP_EMAIL_REQUIRED",
-          "This administrator account needs a real email address before OTP verification can be used. Ask the platform operator to update the account email.",
+          "Add a real business email under Business Profile before using OTP verification.",
           409,
         );
       }
@@ -188,7 +189,7 @@ export async function POST(req: NextRequest) {
       });
       try {
         await sendAdminLoginOtpEmail({
-          to: user.email,
+          to: verificationEmail,
           code: challenge.code,
           fullName: user.fullName,
           tenantName: user.tenant.name,
@@ -203,7 +204,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         otpRequired: true,
         challengeId: challenge.id,
-        maskedEmail: maskEmail(user.email),
+        maskedEmail: maskEmail(verificationEmail),
         expiresInSeconds: Math.round(ADMIN_OTP_TTL_MS / 1000),
       }, { status: 202 });
       response.headers.set("Cache-Control", "no-store, private");
