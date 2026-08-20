@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
+import { ReportDatePicker } from "@/components/report-date-picker";
 import { db } from "@/lib/db";
 import { requireCurrentTenant } from "@/server/auth/current-tenant";
 import { resolveTenantAccessScope } from "@/server/auth/tenant-access-scope";
@@ -27,22 +28,34 @@ function nairobiDateParts(now = new Date()) {
   return Object.fromEntries(parts.map(({ type, value }) => [type, value])) as Record<string, string>;
 }
 
-function periodRange(period: Period, now = new Date()) {
-  const parts = nairobiDateParts(now);
-  const dayStart = new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00+03:00`);
+function normalizeReportDate(value?: string) {
+  const fallbackParts = nairobiDateParts();
+  const fallback = `${fallbackParts.year}-${fallbackParts.month}-${fallbackParts.day}`;
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return fallback;
+  const [year, month, day] = value.split("-").map(Number);
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) return fallback;
+  return value;
+}
+
+function periodRange(period: Period, reportDate: string) {
+  const [yearText, monthText] = reportDate.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const dayStart = new Date(`${reportDate}T00:00:00+03:00`);
   let start = dayStart;
   let end = new Date(start.getTime() + DAY);
   if (period === "weekly") {
-    const dayOfWeek = new Date(`${parts.year}-${parts.month}-${parts.day}T12:00:00Z`).getUTCDay();
+    const dayOfWeek = new Date(`${reportDate}T12:00:00+03:00`).getUTCDay();
     start = new Date(dayStart.getTime() - ((dayOfWeek + 6) % 7) * DAY);
     end = new Date(start.getTime() + 7 * DAY);
   } else if (period === "monthly") {
-    start = new Date(`${parts.year}-${parts.month}-01T00:00:00+03:00`);
-    const nextMonth = Number(parts.month) === 12 ? `${Number(parts.year) + 1}-01` : `${parts.year}-${String(Number(parts.month) + 1).padStart(2, "0")}`;
+    start = new Date(`${yearText}-${monthText}-01T00:00:00+03:00`);
+    const nextMonth = month === 12 ? `${year + 1}-01` : `${yearText}-${String(month + 1).padStart(2, "0")}`;
     end = new Date(`${nextMonth}-01T00:00:00+03:00`);
   } else if (period === "yearly") {
-    start = new Date(`${parts.year}-01-01T00:00:00+03:00`);
-    end = new Date(`${Number(parts.year) + 1}-01-01T00:00:00+03:00`);
+    start = new Date(`${yearText}-01-01T00:00:00+03:00`);
+    end = new Date(`${year + 1}-01-01T00:00:00+03:00`);
   }
   const duration = end.getTime() - start.getTime();
   return { start, end, previousStart: new Date(start.getTime() - duration), previousEnd: start };
@@ -71,20 +84,21 @@ function trendBuckets(period: Period, start: Date, end: Date) {
   return Array.from({ length: 12 }, (_, index) => ({ label: new Date(Date.UTC(2020, index, 1)).toLocaleDateString("en-KE", { month: "short" }), value: 0 }));
 }
 
-export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ period?: string; view?: string }> }) {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ period?: string; view?: string; date?: string }> }) {
   const session = await requireCurrentTenant();
   requirePermission(session, "report.view");
   const query = await searchParams;
   const period: Period = periods.some(({ key }) => key === query.period) ? query.period as Period : "monthly";
   const activeView = reportViews.includes(query.view as typeof reportViews[number]) ? query.view : "dashboard";
-  const range = periodRange(period);
+  const selectedDate = normalizeReportDate(query.date);
+  const range = periodRange(period, selectedDate);
   const scope = await resolveTenantAccessScope(db, session);
   const saleScope = { tenantId: session.tenantId, branchId: { in: scope.branchIds }, status: "COMPLETED" as const };
 
   const [tenant, viewer, sales, previousSales, inventory, staff, shifts, outstandingInvoices, reportInvoices, reportExpenses, purchaseOrders, customers, stockMovements, auditLogs] = await Promise.all([
     db.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, code: true, currency: true, timezone: true } }),
     db.user.findFirst({ where: { id: session.userId, tenantId: session.tenantId, status: "ACTIVE" } }),
-    db.sale.findMany({ where: { ...saleScope, createdAt: { gte: range.start, lt: range.end } }, include: { branch: { select: { id: true, name: true } }, cashier: { select: { id: true, fullName: true } }, customer: { select: { fullName: true, companyName: true } }, items: { select: { quantity: true, unitCost: true, total: true, tax: true, product: { select: { name: true, category: { select: { name: true } } } } } }, payments: { select: { method: true, amount: true, status: true } } }, orderBy: { createdAt: "asc" } }),
+    db.sale.findMany({ where: { ...saleScope, createdAt: { gte: range.start, lt: range.end } }, include: { branch: { select: { id: true, name: true } }, cashier: { select: { id: true, fullName: true } }, customer: { select: { fullName: true, companyName: true } }, items: { select: { quantity: true, unitCost: true, total: true, tax: true, product: { select: { name: true, category: { select: { name: true } } } } }, payments: { select: { method: true, amount: true, status: true } } }, orderBy: { createdAt: "asc" } }),
     db.sale.findMany({ where: { ...saleScope, createdAt: { gte: range.previousStart, lt: range.previousEnd } }, select: { total: true } }),
     db.branchInventory.findMany({ where: { tenantId: session.tenantId, branchId: { in: scope.branchIds }, product: { status: "active" } }, include: { product: { select: { name: true, costPrice: true, sellingPrice: true, trackStock: true } }, branch: { select: { name: true } } } }),
     db.user.findMany({ where: { tenantId: session.tenantId, status: "ACTIVE" }, include: { roles: { where: { role: { tenantId: session.tenantId } }, include: { role: true } }, branches: { include: { branch: { select: { name: true } } } } }, orderBy: { fullName: "asc" } }),
@@ -225,9 +239,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   }
 
   return <PortalShell title="Reports & Insights" role={scope.roleNames.join(", ") || "Tenant Administrator"} current="reports" branchName={`${tenant.name} · ${tenant.code}`}>
-    <section className="report-heading"><div><small>BUSINESS INTELLIGENCE</small><h3>Performance command centre</h3><p>{periodLabel(period, range.start, range.end)} · {scope.isTenantAdmin ? "All tenant branches" : "Assigned branches"}</p></div><div className="report-periods">{periods.map((item) => <a className={period === item.key ? "active" : ""} href={`/app/reports?period=${item.key}${activeView !== "dashboard" ? `&view=${activeView}` : ""}`} key={item.key}>{item.label}</a>)}</div></section>
+    <section className="report-heading"><div><small>BUSINESS INTELLIGENCE</small><h3>Performance command centre</h3><p>{periodLabel(period, range.start, range.end)} · {scope.isTenantAdmin ? "All tenant branches" : "Assigned branches"}</p></div><div className="report-date-controls"><ReportDatePicker selectedDate={selectedDate} activeView={activeView} /><div className="report-periods">{periods.map((item) => <a className={period === item.key ? "active" : ""} href={`/app/reports?period=${item.key}&date=${selectedDate}${activeView !== "dashboard" ? `&view=${activeView}` : ""}`} key={item.key}>{item.label}</a>)}</div></div></section>
     <section className="report-navigation" aria-label="Report categories">
-      {reportGroups.map(({ label, items }) => <article className="report-nav-group" key={label}><h4>{label}</h4><div>{items.map(([key, itemLabel]) => { const tabPeriod = key === "daily-sales" ? "daily" : key === "monthly-sales" ? "monthly" : period; return <a className={activeView === key ? "active" : ""} href={`/app/reports?period=${tabPeriod}&view=${key}`} key={key}>{itemLabel}</a>; })}</div></article>)}
+      {reportGroups.map(({ label, items }) => <article className="report-nav-group" key={label}><h4>{label}</h4><div>{items.map(([key, itemLabel]) => { const tabPeriod = key === "daily-sales" ? "daily" : key === "monthly-sales" ? "monthly" : period; return <a className={activeView === key ? "active" : ""} href={`/app/reports?period=${tabPeriod}&date=${selectedDate}&view=${key}`} key={key}>{itemLabel}</a>; })}</div></article>)}
     </section>
     {activeView !== "dashboard" && <article className="report-card report-detail"><div className="report-card-head"><div><small>SELECTED REPORT</small><h3>{reportViewLabel}</h3><p>{periodLabel(period, range.start, range.end)}</p></div><strong>{detailRows.length} rows</strong></div>{detailRows.length ? <div className="report-detail-table">{detailRows.map((row) => <div className="report-detail-row" key={`${row.label}-${row.note}`}><strong>{row.label}</strong><b>{row.value}</b><small>{row.note}</small></div>)}</div> : <div className="report-empty compact"><span>0</span><h4>No data for this report</h4><p>There are no matching records in the selected period.</p></div>}</article>}
     <section className="report-metrics">{cards.map(([label, value, note]) => <article key={label}><small>{label}</small><strong>{value}</strong><span>{note}</span></article>)}</section>
