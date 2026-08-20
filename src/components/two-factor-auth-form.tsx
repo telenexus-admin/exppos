@@ -49,7 +49,7 @@ export function TwoFactorAuthForm({
       return;
     }
     if (desiredEnabled && !emailEligible) {
-      setError("This administrator account needs a real email address before email OTP 2FA can be enabled.");
+      setError("Set a real Business Profile email before email OTP 2FA can be enabled.");
       return;
     }
 
@@ -115,7 +115,7 @@ export function TwoFactorAuthForm({
             <strong>Password + email OTP</strong>
             <small>
               {desiredEnabled
-                ? "After your password is accepted, a 6-digit code will be sent to your email before the dashboard opens."
+                ? "After your password is accepted, a 6-digit code will be sent to the current Business Profile email before the dashboard opens."
                 : "Your admin account will sign in using the password only."}
             </small>
           </span>
@@ -125,7 +125,7 @@ export function TwoFactorAuthForm({
           <label>
             Verification email
             <input value={email} readOnly disabled />
-            <small>The OTP is sent to the email saved on your administrator account.</small>
+            <small>This always follows the Business email saved under Business Profile.</small>
           </label>
           <label>
             Current password
@@ -148,7 +148,7 @@ export function TwoFactorAuthForm({
         )}
         {!emailEligible && desiredEnabled && (
           <p className="settings-message error" role="alert" style={{ position: "static", marginTop: 16 }}>
-            Replace this account&apos;s email with a real deliverable address before enabling 2FA.
+            Replace the Business Profile email with a real deliverable address before enabling 2FA.
           </p>
         )}
         {error && <p className="settings-message error" role="alert" style={{ position: "static", marginTop: 16 }}>{error}</p>}
@@ -159,7 +159,7 @@ export function TwoFactorAuthForm({
             <strong>{currentEnabled ? "2FA is enabled" : "2FA is disabled"}</strong>
             <span>
               {currentEnabled
-                ? "Your next admin login requires both your password and the email OTP."
+                ? "Your next admin login requires both your password and an OTP sent to the current Business Profile email."
                 : "Enable it whenever you want an additional verification step on login."}
             </span>
           </div>
