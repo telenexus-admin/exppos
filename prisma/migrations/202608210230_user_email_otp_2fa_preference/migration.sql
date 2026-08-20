@@ -1,0 +1,2 @@
+ALTER TABLE "User"
+ADD COLUMN "emailOtp2faEnabled" BOOLEAN NOT NULL DEFAULT false;
