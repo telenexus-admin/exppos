@@ -23,6 +23,7 @@ import "./pwa-install.css";
 import "./operator-access.css";
 import "./mobile-app.css";
 import "./report-calendar-product-image.css";
+import "./desktop-portal-fix.css";
 import { TenantAccountMount } from "@/components/tenant-account-mount";
 import { PwaRegister } from "@/components/pwa-register";
 
