@@ -161,11 +161,43 @@ export async function prepareAdminOtpResend(id: string) {
     WHERE "id" = ${id}
       AND "consumedAt" IS NULL
       AND "expiresAt" > ${now}
-      AND "sendCount" < ${ADMIN_OTP_MAX_SENDS}
-      AND "lastSentAt" <= ${new Date(now.getTime() - ADMIN_OTP_RESEND_COOLDOWN_MS)}
+      AND "sendCount" = ${challenge.sendCount}
+      AND "lastSentAt" = ${challenge.lastSentAt}
     RETURNING *
   `);
 
   if (!updated[0]) throw new AppError("OTP_RESEND_CONFLICT", "Another code was just requested. Check your email or try again shortly.", 409);
-  return { challenge: updated[0], code };
+  return {
+    challenge: updated[0],
+    code,
+    newCodeHash: codeHash,
+    previous: {
+      codeHash: challenge.codeHash,
+      sendCount: challenge.sendCount,
+      lastSentAt: challenge.lastSentAt,
+    },
+  };
+}
+
+export async function rollbackAdminOtpResend(
+  id: string,
+  newCodeHash: string,
+  previous: { codeHash: string; sendCount: number; lastSentAt: Date },
+) {
+  const now = new Date();
+  try {
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "AdminLoginOtpChallenge"
+      SET
+        "codeHash" = ${previous.codeHash},
+        "sendCount" = ${previous.sendCount},
+        "lastSentAt" = ${previous.lastSentAt},
+        "updatedAt" = ${now}
+      WHERE "id" = ${id}
+        AND "codeHash" = ${newCodeHash}
+        AND "consumedAt" IS NULL
+    `);
+  } catch (error) {
+    console.error("OTP resend rollback failed", { challengeId: id, error });
+  }
 }
