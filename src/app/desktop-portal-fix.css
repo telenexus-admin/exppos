@@ -1,0 +1,6 @@
+/* Desktop-only guard: the mobile quick-navigation must never enter the normal page flow. */
+@media (min-width: 821px) {
+  .portal > .portal-mobile-nav {
+    display: none !important;
+  }
+}
