@@ -8,6 +8,7 @@ import { AppError } from "@/lib/errors";
 import { apiError } from "@/server/http";
 import { createTenantLoginSession, setTenantLoginCookies } from "@/server/auth/tenant-login-session";
 import { sendAdminLoginOtpEmail } from "@/server/notifications/admin-login-otp-email";
+import { assertAdminOtpSendAllowed, invalidateAdminOtpChallenge } from "@/server/security/admin-otp-rate-limit";
 import { verifySecret } from "@/server/security/passwords";
 import {
   ADMIN_OTP_TTL_MS,
@@ -177,6 +178,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      await assertAdminOtpSendAllowed(user.id);
       const challenge = await createAdminOtpChallenge({
         userId: user.id,
         tenantId: user.tenantId,
@@ -184,13 +186,18 @@ export async function POST(req: NextRequest) {
         ipAddress,
         deviceInfo: req.headers.get("user-agent"),
       });
-      await sendAdminLoginOtpEmail({
-        to: user.email,
-        code: challenge.code,
-        fullName: user.fullName,
-        tenantName: user.tenant.name,
-        expiresMinutes: Math.round(ADMIN_OTP_TTL_MS / 60_000),
-      });
+      try {
+        await sendAdminLoginOtpEmail({
+          to: user.email,
+          code: challenge.code,
+          fullName: user.fullName,
+          tenantName: user.tenant.name,
+          expiresMinutes: Math.round(ADMIN_OTP_TTL_MS / 60_000),
+        });
+      } catch (error) {
+        await invalidateAdminOtpChallenge(challenge.id);
+        throw error;
+      }
 
       const response = NextResponse.json({
         ok: true,
