@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from "react";
 
 type LoginResponse = {
   ok?: boolean;
@@ -28,6 +28,10 @@ type OtpStep = {
   expiresInSeconds: number;
 };
 
+function blankOtpDigits() {
+  return ["", "", "", "", "", ""];
+}
+
 async function readJson(response: Response) {
   const responseText = await response.text();
   if (!responseText) return {} as LoginResponse;
@@ -45,6 +49,85 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
   const [resending, setResending] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [otpStep, setOtpStep] = useState<OtpStep | null>(null);
+  const [otpDigits, setOtpDigits] = useState<string[]>(blankOtpDigits);
+  const otpInputs = useRef<Array<HTMLInputElement | null>>([]);
+  const otpCode = otpDigits.join("");
+  const otpChallengeId = otpStep?.challengeId;
+
+  useEffect(() => {
+    setOtpDigits(blankOtpDigits());
+    if (!otpChallengeId) return;
+
+    const frame = window.requestAnimationFrame(() => otpInputs.current[0]?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [otpChallengeId]);
+
+  function focusOtp(index: number) {
+    window.requestAnimationFrame(() => otpInputs.current[index]?.focus());
+  }
+
+  function changeOtpDigit(index: number, rawValue: string) {
+    const digits = rawValue.replace(/\D/g, "");
+
+    if (!digits) {
+      setOtpDigits((current) => {
+        const next = [...current];
+        next[index] = "";
+        return next;
+      });
+      return;
+    }
+
+    setOtpDigits((current) => {
+      const next = [...current];
+      digits.slice(0, 6 - index).split("").forEach((digit, offset) => {
+        next[index + offset] = digit;
+      });
+      return next;
+    });
+
+    focusOtp(Math.min(index + digits.length, 5));
+  }
+
+  function handleOtpKeyDown(index: number, event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      setOtpDigits((current) => {
+        const next = [...current];
+        if (next[index]) {
+          next[index] = "";
+          focusOtp(Math.max(0, index - 1));
+        } else if (index > 0) {
+          next[index - 1] = "";
+          focusOtp(index - 1);
+        }
+        return next;
+      });
+      return;
+    }
+
+    if (event.key === "ArrowLeft" && index > 0) {
+      event.preventDefault();
+      focusOtp(index - 1);
+    }
+    if (event.key === "ArrowRight" && index < 5) {
+      event.preventDefault();
+      focusOtp(index + 1);
+    }
+  }
+
+  function handleOtpPaste(event: ClipboardEvent<HTMLDivElement>) {
+    const pasted = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+
+    event.preventDefault();
+    const next = blankOtpDigits();
+    pasted.split("").forEach((digit, index) => {
+      next[index] = digit;
+    });
+    setOtpDigits(next);
+    focusOtp(Math.min(pasted.length - 1, 5));
+  }
 
   function openDestination(body: LoginResponse) {
     const fallback = mode === "staff" ? "/staff/dashboard" : "/app/dashboard";
@@ -112,11 +195,11 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
     return true;
   }
 
-  async function submitOtp(data: FormData, signal: AbortSignal) {
+  async function submitOtp(code: string, signal: AbortSignal) {
     if (!otpStep) return false;
-    const code = String(data.get("otp") ?? "").replace(/\D/g, "");
     if (!/^\d{6}$/.test(code)) {
-      setError("Enter the 6-digit verification code from your email.");
+      setError("Enter the complete 6-digit verification code from your email.");
+      focusOtp(otpDigits.findIndex((digit) => !digit) >= 0 ? otpDigits.findIndex((digit) => !digit) : 0);
       return false;
     }
 
@@ -135,6 +218,9 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
       setError(body.error?.message ?? "The verification code could not be accepted. Try again.");
       if (response.status === 410 || body.error?.code === "OTP_ATTEMPTS_EXCEEDED") {
         setOtpStep(null);
+      } else {
+        setOtpDigits(blankOtpDigits());
+        focusOtp(0);
       }
       return false;
     }
@@ -157,7 +243,7 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
     try {
       const data = new FormData(event.currentTarget);
       navigating = otpStep
-        ? await submitOtp(data, controller.signal)
+        ? await submitOtp(otpCode, controller.signal)
         : await submitCredentials(data, controller.signal);
     } catch (requestError) {
       setStatus("");
@@ -196,6 +282,8 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
         maskedEmail: body.maskedEmail ?? current.maskedEmail,
         expiresInSeconds: body.expiresInSeconds ?? current.expiresInSeconds,
       } : current);
+      setOtpDigits(blankOtpDigits());
+      focusOtp(0);
       setStatus(`A new 6-digit code was sent to ${body.maskedEmail ?? otpStep.maskedEmail}.`);
     } catch {
       setError("The verification email service could not be reached. Try again shortly.");
@@ -222,25 +310,35 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
 
       {otpStep ? (
         <>
-          <label>
-            Verification Code
-            <input
-              className="tenant-otp-input"
-              name="otp"
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder="000000"
-              maxLength={6}
-              pattern="[0-9]{6}"
-              required
-              autoFocus
-              disabled={loading}
-              onInput={(event) => {
-                event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "").slice(0, 6);
-              }}
-            />
-          </label>
+          <div className="tenant-otp-field">
+            <span className="tenant-otp-label" id="tenant-otp-label">Verification Code</span>
+            <div
+              className="tenant-otp-boxes"
+              role="group"
+              aria-labelledby="tenant-otp-label"
+              onPaste={handleOtpPaste}
+            >
+              {otpDigits.map((digit, index) => (
+                <input
+                  key={index}
+                  ref={(element) => { otpInputs.current[index] = element; }}
+                  className="tenant-otp-box"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={1}
+                  value={digit}
+                  autoComplete={index === 0 ? "one-time-code" : "off"}
+                  enterKeyHint={index === 5 ? "done" : "next"}
+                  aria-label={`Verification code digit ${index + 1} of 6`}
+                  disabled={loading || resending}
+                  onChange={(event) => changeOtpDigit(index, event.currentTarget.value)}
+                  onKeyDown={(event) => handleOtpKeyDown(index, event)}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+              ))}
+            </div>
+          </div>
           <div className="tenant-otp-actions">
             <button type="button" onClick={resendCode} disabled={loading || resending}>
               {resending ? "Sending…" : "Resend code"}
@@ -249,6 +347,7 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
               type="button"
               onClick={() => {
                 setOtpStep(null);
+                setOtpDigits(blankOtpDigits());
                 setError("");
                 setStatus("");
               }}
@@ -306,7 +405,11 @@ export function TenantLoginForm({ switching = false, mode = "admin" }: { switchi
       {error && <p className="form-error login-error" role="alert">{error}</p>}
       {status && <p className="login-status" role="status" aria-live="polite">{status}</p>}
 
-      <button className="primary tenant-login-submit" type="submit" disabled={loading || resending}>
+      <button
+        className="primary tenant-login-submit"
+        type="submit"
+        disabled={loading || resending || (Boolean(otpStep) && otpCode.length !== 6)}
+      >
         {loading ? (otpStep ? "Verifying…" : "Signing in…") : otpStep ? "Verify & Sign In" : "Sign In"}
       </button>
     </form>
